@@ -1,0 +1,28 @@
+{
+  "name": "opportune",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch --env-file-if-exists=.env server.js",
+    "start": "node --env-file-if-exists=.env server.js",
+    "test": "node --test tests/",
+    "cron": "node --env-file-if-exists=.env scripts/cron.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.52.0",
+    "express": "^4.21.2",
+    "firebase-admin": "^14.5.0",
+    "grammy": "^1.36.1",
+    "imapflow": "^2.2.10",
+    "mailparser": "^3.9.36",
+    "node-ical": "^0.20.1"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "protobufjs",
+      "@firebase/util",
+      "firebase-admin"
+    ]
+  }
+}

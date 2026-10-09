@@ -1,0 +1,16 @@
+// Two local people (Jess, Eileen) near each other, mutual wantMore, a shared event. Prints tokens for curl.
+import { buildContext } from '../core/context.js'
+const ctx = await buildContext()
+const jess = ctx.people.all().find(p => p.display_name === 'Jess') || ctx.people.create({ displayName: 'Jess' })
+const eileen = ctx.people.all().find(p => p.display_name === 'Eileen') || ctx.people.create({ displayName: 'Eileen' })
+ctx.people.update(jess.id, { onboarding: { step: 'done' } }); ctx.people.update(eileen.id, { onboarding: { step: 'done' } })
+ctx.people.setRel(jess.id, eileen.id, { tier: 'friend', wantMore: true, note: 'lives a block from Grocery Outlet' })
+ctx.people.setRel(eileen.id, jess.id, { tier: 'friend', wantMore: true })
+if (!ctx.people.places(eileen.id).some(p => p.name === 'home')) ctx.people.addPlace(eileen.id, { name: 'home', lat: 37.7745, lng: -122.4365, radiusM: 120 })
+if (!ctx.people.places(jess.id).some(p => p.name === 'Grocery Outlet')) ctx.people.addPlace(jess.id, { name: 'Grocery Outlet', lat: 37.7738, lng: -122.4372, radiusM: 100 })
+const lj = ctx.sources.connect(jess.id, 'locationPost', { app: 'OwnTracks' })
+const le = ctx.sources.connect(eileen.id, 'locationPost', { app: 'OwnTracks' })
+const sat = new Date(); sat.setDate(sat.getDate() + ((6 - sat.getDay() + 7) % 7 || 7)); sat.setHours(19, 0, 0, 0)
+await ctx.observations.ingest(eileen.id, 'manual', [{ kind: 'event', at: sat.toISOString(), until: new Date(sat.getTime() + 3 * 3600e3).toISOString(), dedupeKey: 'seed-party', data: { title: 'Sam\'s birthday thing', location: 'Mission', url: 'https://partiful.com/e/seedparty', provider: 'seed', attendees: [{ name: 'Jess' }] } }])
+await ctx.observations.ingest(eileen.id, 'manual', [{ kind: 'location', data: { lat: 37.7745, lng: -122.4365, placeName: 'home' } }, { kind: 'status', until: new Date(Date.now() + 4 * 3600e3).toISOString(), data: { porchlight: 'open' } }])
+console.log(JSON.stringify({ jess: { id: jess.id, ingest: ctx.sources.ingestUrl(lj) }, eileen: { id: eileen.id, ingest: ctx.sources.ingestUrl(le) }, hint: `curl -X POST ${ctx.sources.ingestUrl(lj)} -H 'content-type: application/json' -d '{"lat":37.7738,"lng":-122.4372}'  # Jess arrives at GO` }, null, 2))

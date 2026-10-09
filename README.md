@@ -30,6 +30,19 @@ pnpm test
 Then open your bot in Telegram, `/start`. Onboarding is six messages. `/invite Eileen`
 makes a one-time link that tells Eileen you want to see more of her.
 
+## Deploy to a VPS
+
+```
+doctl compute droplet create opportune --region sfo2 --size s-1vcpu-2gb --image ubuntu-24-04-x64 \
+  --ssh-keys <your-key-id> --user-data-file deploy/cloud-init.sh --wait
+# set NODE_URL=https://<ip>.sslip.io in .env (or your own domain pointed at the box), then:
+deploy/deploy.sh <ip>              # rsync, pnpm install, systemd unit, Caddy with automatic HTTPS
+ssh root@<ip> journalctl -u opportune -f
+```
+Caddy terminates TLS on `<ip>.sslip.io` so no domain is needed. Pass a hostname as the
+second argument to deploy.sh to use your own domain. Only one process may poll the Telegram
+bot token at a time, so stop `pnpm dev` locally before deploying.
+
 ## What's in the box
 
 | dir | what |

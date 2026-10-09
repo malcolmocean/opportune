@@ -45,7 +45,12 @@ export function makeJudge(db, ctx) {
       return null
     },
     async decide(person, opp, extra = {}) {
-      if (!ctx.llm.enabled) return { verdict: 'nudge', reasoning: 'llm disabled, passing through', text: opp.summary, actions: defaultActions(opp) }
+      if (!ctx.llm.enabled) {
+        // JUDGE_STUB=ask makes the stub ask the other participant's agent first (kind from JUDGE_STUB_KIND, default dropin), for tests
+        if (ctx.env.JUDGE_STUB === 'ask' && !extra.answer) return { verdict: 'ask', reasoning: 'stub: ask first', ask: { kind: ctx.env.JUDGE_STUB_KIND || 'dropin', text: opp.summary } }
+        if (extra.answer && ['no', 'unlikely'].includes(extra.answer.answer)) return { verdict: 'suppress', reasoning: `stub: other side said ${extra.answer.answer}` }
+        return { verdict: 'nudge', reasoning: 'llm disabled, passing through', text: extra.answer ? `${opp.summary} (${extra.answer.reason})` : opp.summary, actions: defaultActions(opp) }
+      }
       const others = opp.participants.filter(p => p !== person.id).map(id => {
         const p = ctx.people.get(id), r = ctx.people.rel(person.id, id)
         return { id, name: p?.display_name, tier: r?.tier, wantMore: !!r?.want_more, note: r?.note, theyWantMore: !!ctx.people.rel(id, person.id)?.want_more }

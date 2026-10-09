@@ -10,6 +10,7 @@ const app = express()
 app.use(express.json({ limit: '2mb', verify: (req, _res, buf) => { req.rawBody = buf.toString() } }))
 app.use(express.urlencoded({ extended: true }))
 app.use('/web', express.static('web'))
+app.use('/', express.static('site', { index: 'index.html' }))   // landing page, if present
 
 // ---- federation surface ----
 app.get('/.well-known/opportune', (_req, res) => res.json(ctx.federation.wellKnown()))

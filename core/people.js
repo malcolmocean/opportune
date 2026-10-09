@@ -16,7 +16,7 @@ export const POLICY_DEFAULTS = {
   revealUnprompted: ['status'],    // observation kinds the agent may volunteer
 }
 
-export function makePeople(db, env) {
+export function makePeople(db, env, events) {
   const nodeUrl = env.NODE_URL || 'http://localhost:3400'
   const P = {
     nodeUrl,
@@ -49,7 +49,32 @@ export function makePeople(db, env) {
       return r ? P.get(r.person_id) : null
     },
     bind(personId, channel, externalId, meta = {}) {
-      db.run('insert or replace into identities (person_id, channel, external_id, meta) values (?,?,?,?)', personId, channel, String(externalId), JSON.stringify(meta))
+      const ext = channel === 'email' ? normEmail(externalId) : channel === 'phone' ? normPhone(externalId) : String(externalId)
+      const existed = db.get('select 1 from identities where channel = ? and external_id = ? and person_id = ?', channel, ext, personId)
+      db.run('insert or replace into identities (person_id, channel, external_id, meta) values (?,?,?,?)', personId, channel, ext, JSON.stringify(meta))
+      if (!existed) events?.emit('identity:bound', { personId, channel, externalId: ext })
+    },
+
+    // contacts: the owner's address book (from the phone app), owner-scoped, used to
+    // (a) notice when someone in your contacts joins, (b) name guest-list emails.
+    addContacts(ownerId, list) {
+      let n = 0
+      for (const c of list || []) {
+        for (const e of c.emails || []) { const v = normEmail(e); if (v) { db.run('insert or ignore into contacts (owner_id, kind, value, name, created_at) values (?,?,?,?,?)', ownerId, 'email', v, c.name || null, now()); n++ } }
+        for (const ph of c.phones || []) { const v = normPhone(ph); if (v) { db.run('insert or ignore into contacts (owner_id, kind, value, name, created_at) values (?,?,?,?,?)', ownerId, 'phone', v, c.name || null, now()); n++ } }
+      }
+      events?.emit('contacts:added', { ownerId, count: n })
+      return n
+    },
+    contactName(ownerId, { email, phone }) {
+      const r = email ? db.get('select name from contacts where owner_id = ? and kind = ? and value = ?', ownerId, 'email', normEmail(email))
+        : phone ? db.get('select name from contacts where owner_id = ? and kind = ? and value = ?', ownerId, 'phone', normPhone(phone)) : null
+      return r?.name || null
+    },
+    // who has this email/phone in their contacts? → [{ ownerId, name }]
+    ownersWithContact(kind, value) {
+      const v = kind === 'email' ? normEmail(value) : normPhone(value)
+      return db.all('select owner_id, name from contacts where kind = ? and value = ?', kind, v).map(r => ({ ownerId: r.owner_id, name: r.name }))
     },
     identities(personId) { return db.all('select * from identities where person_id = ?', personId).map(r => parseRow(r, ['meta'])) },
 
@@ -105,6 +130,9 @@ export function makePeople(db, env) {
   }
   return P
 }
+
+export const normEmail = e => (e || '').trim().toLowerCase() || null
+export const normPhone = p => { const d = (p || '').replace(/[^\d+]/g, ''); if (!d) return null; const digits = d.replace(/\D/g, ''); return digits.length === 10 ? '+1' + digits : (d.startsWith('+') ? '+' : '+') + digits }
 
 function genKeys() {
   const { publicKey, privateKey } = generateKeyPairSync('ed25519')

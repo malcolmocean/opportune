@@ -137,6 +137,15 @@ create table if not exists chat_log (
   content json not null,
   created_at text not null
 );
+create table if not exists contacts (
+  owner_id text not null references people(id),
+  kind text not null,               -- email | phone
+  value text not null,              -- normalized (lowercase email, E.164-ish digits)
+  name text,
+  created_at text not null,
+  primary key (owner_id, kind, value)
+);
+create index if not exists contacts_value on contacts(kind, value);
 create table if not exists kv (k text primary key, v json);
 `
 

@@ -36,6 +36,7 @@ export function makeJudge(db, ctx) {
       const today = db.get(`select count(*) c from nudges where person_id = ? and created_at > ?`, person.id, new Date(Date.now() - 864e5).toISOString()).c
       if (today >= (pol.maxNudgesPerDay ?? 6)) return 'daily nudge cap'
       // wantMore filter: at least one side of each pair must want more of the other
+      if (opp.kind === 'contactJoined') return null   // the whole point is that there's no relationship yet
       for (const other of opp.participants.filter(p => p !== person.id)) {
         const a = ctx.people.rel(person.id, other), b = ctx.people.rel(other, person.id)
         if (!a && !b) return `no relationship with ${other}`

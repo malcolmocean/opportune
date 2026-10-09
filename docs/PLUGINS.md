@@ -12,7 +12,7 @@ Every plugin function receives `ctx` first:
 | ctx member | what |
 |---|---|
 | `ctx.db` | sqlite wrapper: `get/all/run/insert/kvGet/kvSet` (see `core/db.js`) |
-| `ctx.people` | `get(id)`, `all()`, `friendsOf(id)`, `rel(from,to)` (has `.effectiveGrants`), `setRel`, `identities(id)`, `bind`, `places(id)`, `addPlace`, `invite`, `policy(id)`, `nodeUrl` |
+| `ctx.people` | `addContacts(ownerId, [{name, emails, phones}])`, `contactName(ownerId, {email})`, `ownersWithContact('email', v)`, `get(id)`, `all()`, `friendsOf(id)`, `rel(from,to)` (has `.effectiveGrants`), `setRel`, `identities(id)`, `bind`, `places(id)`, `addPlace`, `invite`, `policy(id)`, `nodeUrl` |
 | `ctx.observations` | `ingest(personId, sourceId, obs[])`, `latest(personId, kind, {within})`, `recent(personId, {kinds, since, limit})`, `eventsIn(personId, startIso, endIso)` |
 | `ctx.query` | `ask({from,to,kind,text,window})`, `fanout(from, {...})` |
 | `ctx.nudges` | `send(personId, {text, actions, decisionId})`, `respond(nudgeId, actionKey)` |
@@ -20,7 +20,7 @@ Every plugin function receives `ctx` first:
 | `ctx.llm` | `complete({system,messages})`, `json({...})`, `agent({system,messages,tools})`; `ctx.llm.enabled` |
 | `ctx.sources` | `forPerson(id)`, `connect(personId, sourceId, config)`, `ingestUrl(sourceConfig)` |
 | `ctx.geo` | `distanceM(a,b)`, `fmtDistance`, `minutesAgo` |
-| `ctx.events` | EventEmitter: `nudge:response`, `query:answered`, `federation:suggest` |
+| `ctx.events` | EventEmitter: `nudge:response`, `query:answered`, `federation:suggest`, `identity:bound` {personId, channel, externalId}, `contacts:added` |
 | `ctx.plugins` | all loaded manifests by kind and id |
 | `ctx.log(name)` | logger |
 

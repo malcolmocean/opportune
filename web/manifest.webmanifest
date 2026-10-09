@@ -1,0 +1,12 @@
+{
+  "name": "opportune",
+  "short_name": "opportune",
+  "start_url": "/web/manage",
+  "scope": "/web/",
+  "display": "standalone",
+  "background_color": "#fbf7ef",
+  "theme_color": "#2380e4",
+  "icons": [
+    { "src": "/web/icon.png", "sizes": "384x384", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

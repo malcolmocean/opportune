@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#2380e4">
+<title>opportune map</title>
+<link rel="icon" type="image/png" href="/web/icon.png">
+<link rel="apple-touch-icon" href="/web/icon.png">
+<link rel="stylesheet" href="/web/manage.css">
+<style>
+  body { height: 100dvh }
+  #mapEl { position: fixed; inset: 0; height: auto }
+  .back { position: fixed; top: max(12px, env(safe-area-inset-top)); left: 12px; z-index: 400 }
+  .map-legend { position: fixed }
+  .leaflet-top.leaflet-left { top: calc(max(12px, env(safe-area-inset-top)) + 40px) }
+</style>
+</head>
+<body>
+<div id="mapEl" class="map"></div>
+<a class="btn small back" id="back" href="/web/manage">← manage</a>
+<div class="map-legend" id="legend">Loading…</div>
+<div class="gate" id="gate" hidden><h1>opportune</h1><p id="gateMsg"></p></div>
+<script type="module">
+  import { tokenFromPage, fetchMap, mountMap } from '/web/map.js'
+  const token = tokenFromPage()
+  const gate = document.getElementById('gate'), msg = document.getElementById('gateMsg')
+  const fail = m => { msg.textContent = m; gate.hidden = false }
+  if (!token) fail('This page needs a link from your agent.')
+  else {
+    document.getElementById('back').href = `/web/manage?token=${encodeURIComponent(token)}#map`
+    try {
+      const data = await fetchMap(token)
+      const h = await mountMap(document.getElementById('mapEl'), data, { legendEl: document.getElementById('legend') })
+      setInterval(async () => { try { h.update(await fetchMap(token)) } catch {} }, 60e3)
+    } catch (e) { fail(e.status === 401 ? 'That link is not valid any more. Ask your agent for a fresh one.' : e.message) }
+  }
+</script>
+</body>
+</html>

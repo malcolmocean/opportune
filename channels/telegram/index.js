@@ -1,4 +1,5 @@
 import { Bot, InlineKeyboard } from 'grammy'
+import { manageUrl } from '../../web/routes.js'
 
 // Telegram: onboarding, nudges with action buttons, and chat with your agent.
 let bot, me
@@ -36,14 +37,15 @@ export default {
       await c.reply(`Hey ${p.display_name}. Say "who's around tonight?", "I'm home and open", or /help.`)
     })
 
-    bot.command('help', c => c.reply(`Just talk to me. Or:\n/whosaround — who's plausibly free\n/porchlight — open/closed/ask for drop-ins\n/invite Name — one-time link for someone you want more of\n/friends — your people\n/sources — connect calendar, location, …\n/review — rate my recent calls\n/me — what I know about you right now`))
+    bot.command('help', c => c.reply(`Just talk to me. Or:\n/whosaround — who's plausibly free\n/porchlight — open/closed/ask for drop-ins\n/invite Name — one-time link for someone you want more of\n/friends — your people\n/sources — connect calendar, location, …\n/review — rate my recent calls\n/manage — settings page: friends, grants, sources, map\n/me — what I know about you right now`))
+    bot.command('manage', c => { const p = whoami(c); if (!p) return; c.reply(`Your settings page (private link, don't forward it):\n${manageUrl(ctx, p.id)}`) })
 
     bot.command('whosaround', async c => { const p = whoami(c); if (!p) return; await c.replyWithChatAction('typing'); c.reply(await ctx.agent.chat(p.id, `Who's around ${c.match || 'this evening'}? Give me a shortlist.`)) })
     bot.command('me', async c => { const p = whoami(c); if (!p) return; const obs = ctx.observations.recent(p.id, { limit: 8 }); c.reply(obs.length ? obs.map(o => `${o.kind} ${o.at.slice(0, 16)} ${JSON.stringify(o.data).slice(0, 120)}`).join('\n') : 'Nothing yet. /sources to connect something.') })
     bot.command('friends', async c => {
       const p = whoami(c); if (!p) return
       const fs = ctx.people.friendsOf(p.id)
-      c.reply(fs.length ? fs.map(f => `${f.want_more ? '★' : '·'} ${f.display_name} (${f.tier}${f.remote ? ', remote' : ''})${f.note ? ` — ${f.note}` : ''}`).join('\n') + '\n\n★ = you want more of them. Tell me to change any of this.' : 'No one yet. /invite Name to make a link.')
+      c.reply(fs.length ? fs.map(f => `${f.want_more ? '★' : '·'} ${f.display_name} (${f.tier}${f.remote ? ', remote' : ''})${f.note ? ` — ${f.note}` : ''}`).join('\n') + `\n\n★ = you want more of them. Tell me to change any of this, or edit tiers and grants here: ${manageUrl(ctx, p.id)}#people` : 'No one yet. /invite Name to make a link.')
     })
     bot.command('invite', async c => {
       const p = whoami(c); if (!p) return
@@ -64,6 +66,7 @@ export default {
       const p = whoami(c); if (!p) return
       const rows = ctx.db.all(`select d.id, d.verdict, d.reasoning, d.rating, o.summary from decisions d left join opportunities o on o.id = d.opportunity_id where d.person_id = ? order by d.created_at desc limit 6`, p.id)
       if (!rows.length) return c.reply('No judgement calls yet.')
+      await c.reply(`Full history: ${manageUrl(ctx, p.id)}#review`)
       for (const r of rows) {
         await c.reply(`${r.verdict === 'suppress' ? '🤫' : '🔔'} ${r.summary}\n_${r.reasoning}_${r.rating ? `\n(rated ${r.rating})` : ''}`, { parse_mode: 'Markdown', reply_markup: new InlineKeyboard().text('👍 good call', `rate:${r.id}:good`).text('👎 bad call', `rate:${r.id}:bad`) })
       }
@@ -142,7 +145,7 @@ async function advance(ctx, c, p, step) {
   if (step === 'porchlight') return c.reply(`Drop-ins at your place: when are they generally welcome?`, { reply_markup: new InlineKeyboard().text('Weekday evenings', 'ob:pl:evenings').text('Weekends', 'ob:pl:weekends').row().text('Ask me each time', 'ob:pl:ask').text('Not really', 'ob:pl:closed') })
   if (step === 'done') {
     ctx.people.update(p.id, { onboarding: { step: 'done' } })
-    return c.reply(`That's it. I'll stay quiet unless something's worth it, and each morning I'll show you what I kept quiet about so you can correct me.\n\nTry: "who's around tonight?" or "I'm home and open till 9".`)
+    return c.reply(`That's it. I'll stay quiet unless something's worth it, and each morning I'll show you what I kept quiet about so you can correct me.\n\nTry: "who's around tonight?" or "I'm home and open till 9". Tiers, grants and sources live at /manage.`)
   }
 }
 async function onboard(ctx, c, p, text) {

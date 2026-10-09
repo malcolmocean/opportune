@@ -1,0 +1,13 @@
+/build/
+/app/build/
+.gradle/
+local.properties
+.idea/
+*.iml
+.DS_Store
+# Firebase config (per-project; see README)
+/app/google-services.json
+# Signing keys
+*.jks
+*.keystore
+keystore.properties

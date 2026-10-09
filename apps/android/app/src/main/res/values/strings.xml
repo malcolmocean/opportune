@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">opportune</string>
+    <string name="setup_label">Paste the URL the Telegram bot gave you (…/ingest/opportuneApp/…)</string>
+    <string name="setup_hint">https://your-node/ingest/opportuneApp/token</string>
+    <string name="save">Save</string>
+    <string name="porchlight">Porchlight</string>
+    <string name="porchlight_help">Drop-ins at your place for the next 6 hours</string>
+    <string name="pl_open">Open</string>
+    <string name="pl_ask">Ask</string>
+    <string name="pl_closed">Closed</string>
+    <string name="review">Review</string>
+    <string name="review_help">What it nudged about and what it stayed quiet about</string>
+    <string name="open_review">Open review page</string>
+    <string name="contacts">Share contacts</string>
+    <string name="contacts_help">So opportune can tell you when someone you know joins, and name people on guest lists. Stays on your node.</string>
+    <string name="nudges">Recent nudges</string>
+    <string name="no_nudges">Nothing yet. Nudges arrive here as notifications.</string>
+    <string name="location_channel_name">Location</string>
+    <string name="location_channel_description">Shows while opportune is watching your location</string>
+    <string name="location_notification_title">opportune is on</string>
+    <string name="location_notification_text">Sharing location with your node</string>
+    <string name="nudge_channel_name">Nudges</string>
+    <string name="nudge_channel_description">Opportunities to see your people</string>
+</resources>

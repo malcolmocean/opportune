@@ -9,13 +9,19 @@ const VETO_WINDOW_MS = 40 * 60e3
 const VETO_CLOSE_MS = 2 * 3600e3
 const pendingKey = (toId, fromId) => `dropin:pending:${toId}:${fromId}`
 const nudgeKey = nudgeId => `dropin:nudge:${nudgeId}`
+const yesKey = (toId, fromId) => `dropin:yes:${toId}:${fromId}`
+const graduateKey = nudgeId => `dropin:graduate:${nudgeId}`
+const GRADUATE_AFTER = 3
 
 export default {
   id: 'dropin', kind: 'dropin', sensitivity: 2, grant: 'askDropin',
   description: 'Is now ok for this friend to drop by? Porchlight + home/not-home + calendar; default-yes with a veto nudge to the host.',
 
   init(ctx) {
-    ctx.events.on('nudge:response', ({ nudge, actionKey }) => onResponse(ctx, nudge, actionKey).catch(e => ctx.log('dropin').error('veto handler failed', e)))
+    ctx.events.on('nudge:response', ({ nudge, actionKey }) => {
+      if (actionKey?.startsWith('grant:autoYesDropin:')) return onGraduateResponse(ctx, nudge, actionKey)
+      onResponse(ctx, nudge, actionKey).catch(e => ctx.log('dropin').error('veto handler failed', e))
+    })
   },
 
   async answer(ctx, { from, to, relationship, text, context }) {
@@ -85,5 +91,33 @@ async function onResponse(ctx, nudge, actionKey) {
     if (from) await ctx.nudges.send(rec.from, { text: `${to?.display_name || 'They'}'s not up for it right now, another time.`, actions: [] })
   } else if (actionKey === 'yes' && from) {
     await ctx.nudges.send(rec.from, { text: `${to?.display_name || 'They'} says come on by.`, actions: [] })
+    await graduate(ctx, to, from)
   }
+}
+
+// Trust graduation: after the 3rd yes for this friend (and every 3rd after a "keep asking"), offer autoYesDropin.
+async function graduate(ctx, to, from) {
+  const key = yesKey(to.id, from.id)
+  const n = (ctx.db.kvGet(key) || 0) + 1
+  ctx.db.kvSet(key, n)
+  if (n < GRADUATE_AFTER || n % GRADUATE_AFTER !== 0) return
+  const rel = ctx.people.rel(to.id, from.id)
+  if (!rel || rel.effectiveGrants.autoYesDropin) return
+  const nudge = await ctx.nudges.send(to.id, {
+    text: `You've said yes to ${from.display_name} dropping by ${n} times. Want me to just say yes for them from now on? You can always flip your porchlight to closed.`,
+    actions: [{ key: `grant:autoYesDropin:${from.id}`, label: 'Yes, auto-yes them' }, { key: 'no', label: 'Keep asking me' }],
+  })
+  if (nudge?.id) ctx.db.kvSet(graduateKey(nudge.id), { to: to.id, from: from.id })
+}
+
+// The host accepted the graduation offer: grant autoYesDropin on their edge to the friend.
+function onGraduateResponse(ctx, nudge, actionKey) {
+  const rec = ctx.db.kvGet(graduateKey(nudge.id))
+  if (!rec) return
+  const fromId = actionKey.slice('grant:autoYesDropin:'.length)
+  if (fromId !== rec.from || nudge.person_id !== rec.to) return
+  const rel = ctx.people.rel(rec.to, rec.from)
+  if (!rel) return
+  ctx.people.setRel(rec.to, rec.from, { grants: { ...rel.grants, autoYesDropin: true } })
+  ctx.log('dropin').info(`${rec.to} granted autoYesDropin to ${rec.from}`)
 }

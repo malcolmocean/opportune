@@ -265,3 +265,38 @@ test('query: unsupported when Eileen has no home, no location and no sources', a
   assert.equal(a.answer, 'unsupported')
   assert.equal(a.suggest.plugin, 'queries/dropin')
 })
+
+test('graduation: 3rd yes offers autoYesDropin; accepting grants it and stops the veto nudges', async () => {
+  const { ctx, jess, eileen, eileenHome, ask } = await setup()
+  await eileenHome()
+  const vetoNudges = () => nudgesFor(ctx, eileen).filter(n => JSON.parse(n.actions).some(a => a.key === 'veto'))
+  const offers = () => nudgesFor(ctx, eileen).filter(n => JSON.parse(n.actions).some(a => a.key.startsWith('grant:autoYesDropin:')))
+  for (let i = 1; i <= 3; i++) {
+    assert.equal((await ask()).answer, 'likely')
+    const n = vetoNudges().at(-1)
+    assert.equal(vetoNudges().length, i)
+    await ctx.nudges.respond(n.id, 'yes')
+    await new Promise(r => setTimeout(r, 20))
+    assert.equal(ctx.db.kvGet(`dropin:yes:${eileen.id}:${jess.id}`), i)
+    assert.equal(offers().length, i === 3 ? 1 : 0, `offer only after the 3rd yes (round ${i})`)
+    // close the window so the next ask sends a fresh veto nudge
+    ctx.db.kvSet(`dropin:pending:${eileen.id}:${jess.id}`, { nudgeId: n.id, until: new Date(Date.now() - 1000).toISOString() })
+  }
+  const [offer] = offers()
+  assert.equal(offer.text, "You've said yes to Jess dropping by 3 times. Want me to just say yes for them from now on? You can always flip your porchlight to closed.")
+  const acts = JSON.parse(offer.actions)
+  assert.equal(acts[0].key, `grant:autoYesDropin:${jess.id}`)
+  assert.deepEqual(acts[1], { key: 'no', label: 'Keep asking me' })
+  assert.equal(ctx.people.rel(eileen.id, jess.id).effectiveGrants.autoYesDropin, false)
+  await ctx.nudges.respond(offer.id, acts[0].key)
+  const rel = ctx.people.rel(eileen.id, jess.id)
+  assert.equal(rel.grants.autoYesDropin, true)
+  assert.equal(rel.effectiveGrants.autoYesDropin, true)
+  assert.equal(rel.tier, 'friend', 'tier unchanged; only the grant')
+  // next ask: likely with no nudge to Eileen at all
+  const before = nudgesFor(ctx, eileen).length
+  const a = await ask()
+  assert.equal(a.answer, 'likely')
+  assert.equal(a.reason, 'probably fine')
+  assert.equal(nudgesFor(ctx, eileen).length, before)
+})

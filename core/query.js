@@ -21,7 +21,9 @@ export function makeQuery(db, ctx) {
       if (!rel) { log_('no', 'not a friend'); return { answer: 'no', reason: 'not a friend' } }
       if (!plugin) {
         log_('unsupported', 'no plugin')
-        return { answer: 'unsupported', reason: `this node has no "${kind}" query`, suggest: suggestFor(kind) }
+        const suggest = suggestFor(kind)
+        if (suggest) ctx.events.emit('federation:suggest', { from: ctx.people.get(from), to: ctx.people.get(to), suggest, kind, why: `${ctx.people.get(from)?.display_name}'s agent asked about ${kind}` })
+        return { answer: 'unsupported', reason: `this node has no "${kind}" query`, suggest }
       }
       const grantKey = plugin.grant
       if (grantKey && !rel.effectiveGrants[grantKey]) { log_('no', `grant ${grantKey} not given`); return { answer: 'no', reason: 'not permitted', confidence: 1 } }
@@ -34,6 +36,7 @@ export function makeQuery(db, ctx) {
         const ans = await plugin.answer(ctx, { from: asker, to: ctx.people.get(to), relationship: rel, text, window, context })
         log_(ans.answer, ans.reason)
         ctx.events.emit('query:answered', { from, to, kind, ans })
+        if (ans.answer === 'unsupported' && ans.suggest) ctx.events.emit('federation:suggest', { from: asker, to: ctx.people.get(to), suggest: ans.suggest, kind, why: `${asker?.display_name}'s agent asked about ${kind}` })
         return ans
       } catch (e) { L.error(`query ${kind} failed`, e); log_('unsupported', e.message); return { answer: 'unsupported', reason: e.message } }
     },

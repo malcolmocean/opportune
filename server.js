@@ -14,7 +14,7 @@ app.use('/', express.static('site', { index: 'index.html' }))   // landing page,
 
 // ---- federation surface ----
 app.get('/.well-known/opportune', (_req, res) => res.json(ctx.federation.wellKnown()))
-app.post('/friend/accept', (req, res) => res.json(ctx.federation.acceptIncoming(req.body)))   // signed by a not-yet-known key, so verified by invite code instead
+app.post('/friend/accept', (req, res) => { const r = ctx.federation.acceptIncoming(req.body); res.status(r.error ? 400 : 200).json(r) })   // signed by a not-yet-known key, so verified by invite code instead
 app.post('/q', (req, res, next) => ctx.federation.verify(req, res, next), async (req, res) => {
   const { to, kind, text, window, context } = req.body
   res.json(await ctx.query.answerLocal({ from: req.fromPerson.id, to, kind, text, window, context }))

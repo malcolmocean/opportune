@@ -31,6 +31,16 @@ export async function buildContext(env = process.env, { dbPath } = {}) {
   ctx.agent = makeAgent(db, ctx)
   ctx.sources = makeSources(db, ctx)
   ctx.digest = makeDigest(db, ctx)
+  ctx.events.on('federation:suggest', async ({ from, to, suggest, kind, why }) => {
+    if (!to || to.remote || to.onboarding?.step !== 'done' || !suggest) return
+    const key = `suggested:${to.id}:${suggest.plugin || kind}`
+    if (db.kvGet(key) > Date.now() - 7 * 864e5) return
+    db.kvSet(key, Date.now())
+    const srcId = (suggest.plugin || '').split('/')[1]
+    const src = ctx.plugins.sources[srcId]
+    const how = src ? `Connect "${src.name}" with /sources.` : suggest.repo ? `Your node doesn't have it yet: ${suggest.repo}` : (suggest.setup || '')
+    await ctx.nudges.send(to.id, { text: `${why || `A friend's agent asked about ${kind}`}, but I couldn't answer: ${suggest.setup || 'missing data'}. ${how}`, actions: [{ key: 'no', label: 'Not now' }] })
+  })
   for (const p of [...Object.values(ctx.plugins.sources), ...Object.values(ctx.plugins.triggers), ...Object.values(ctx.plugins.queries)]) {
     if (p.init) await p.init(ctx)
   }

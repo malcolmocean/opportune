@@ -23,13 +23,15 @@ export function makeFederation(db, ctx) {
       const from = req.get('x-opportune-from'), ts = req.get('x-opportune-ts'), nonce = req.get('x-opportune-nonce'), sig = req.get('x-opportune-sig')
       if (!from || !ts || !nonce || !sig) return res.status(401).json({ error: 'unsigned' })
       if (Math.abs(Date.now() - Number(ts)) > 5 * 60e3) return res.status(401).json({ error: 'stale' })
-      const seen = db.kvGet(`nonce:${nonce}`); if (seen) return res.status(401).json({ error: 'replay' })
-      db.kvSet(`nonce:${nonce}`, ts)
       const person = ctx.people.get(from)
       if (!person?.pubkey) return res.status(401).json({ error: 'unknown sender' })
       const key = createPublicKey({ key: Buffer.from(person.pubkey, 'base64'), format: 'der', type: 'spki' })
       const ok = verify(null, Buffer.from(canon({ method: req.method, path: req.path, ts, nonce, body: req.rawBody })), key, Buffer.from(sig, 'base64'))
       if (!ok) return res.status(401).json({ error: 'bad signature' })
+      const nk = `nonce:${from}:${nonce}`
+      if (db.kvGet(nk)) return res.status(401).json({ error: 'replay' })
+      db.kvSet(nk, Number(ts))
+      if (Math.random() < 0.02) db.run(`delete from kv where k like 'nonce:%' and cast(v as integer) < ?`, Date.now() - 10 * 60e3)
       req.fromPerson = person
       next()
     },
@@ -43,7 +45,10 @@ export function makeFederation(db, ctx) {
       const me = ctx.people.get(from)
       try {
         const ans = await F.post(me, remotePerson.node_url, '/q', { to: remotePerson.id, kind, text, window, context })
-        if (ans.answer === 'unsupported' && ans.suggest) ctx.events.emit('federation:suggest', { from: remotePerson, to: me, suggest: ans.suggest, kind })
+        if (ans.answer === 'unsupported' && ans.suggest) {
+          // self-transcendence: tell THEIR node what would have made this answerable; it decides whether to nudge them
+          F.post(me, remotePerson.node_url, '/suggest', { to: remotePerson.id, ...ans.suggest, kind, why: `${me.display_name}'s agent asked about ${kind}` }).catch(e => L.warn('suggest failed', e.message))
+        }
         return ans
       } catch (e) { L.warn('remote ask failed', e.message); return { answer: 'unsupported', reason: e.message } }
     },

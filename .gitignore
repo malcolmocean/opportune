@@ -8,3 +8,4 @@ apps/android/local.properties
 apps/android/app/google-services.json
 sources/*/.venv
 __pycache__
+data/

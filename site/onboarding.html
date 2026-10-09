@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>opportune onboarding flow</title>
+<meta name="description" content="Every message a new person sees, from each starting point, with inline comments.">
+<link rel="icon" href="img/icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Figtree:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --night: #090b22; --night-2: #11143a; --glass: rgba(255,255,255,.055); --line: rgba(190,196,255,.16);
+  --ink: #eeedf8; --mute: #a4a8cf; --ember: #ff6b3d; --magenta: #d63fc6; --volt: #4a74ff; --mint: #4ad99a;
+  --display: "Bricolage Grotesque", system-ui, sans-serif; --body: "Figtree", system-ui, sans-serif; --mono: "IBM Plex Mono", ui-monospace, monospace;
+  color-scheme: dark;
+}
+:root[data-theme="light"] { --night: #f6f5ff; --night-2: #ffffff; --glass: rgba(0,0,0,.04); --line: rgba(20,24,80,.14); --ink: #15173a; --mute: #5a5e8a; color-scheme: light }
+* { box-sizing: border-box }
+body { margin: 0; background: var(--night); color: var(--ink); font-family: var(--body); line-height: 1.5; font-size: 1.0625rem }
+h1, h2, h3 { font-family: var(--display); letter-spacing: -.02em; margin: 0; text-wrap: balance }
+a { color: inherit }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 32px 16px 96px }
+header.top { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-bottom: 28px }
+header.top img { width: 44px; height: 44px; border-radius: 12px }
+header.top h1 { font-size: clamp(1.6rem, 1.2rem + 1.6vw, 2.3rem) }
+header.top p { margin: 4px 0 0; color: var(--mute) }
+.legend { display: flex; gap: 10px; flex-wrap: wrap; margin: 14px 0 30px; font-size: .9rem }
+.badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--glass); font-family: var(--mono); font-size: .74rem; letter-spacing: .02em; text-transform: uppercase }
+.badge::before { content: ""; width: 8px; height: 8px; border-radius: 50% }
+.badge.built::before { background: var(--mint) }
+.badge.changed::before { background: var(--volt) }
+.badge.proposed::before { background: var(--ember) }
+.badge.gone::before { background: var(--mute) }
+.lanes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px }
+@media (max-width: 900px) { .lanes { grid-template-columns: 1fr } }
+.lane { border: 1px solid var(--line); border-radius: 18px; padding: 16px; background: linear-gradient(180deg, var(--glass), transparent) }
+.lane h2 { font-size: 1.2rem; margin-bottom: 4px }
+.lane .sub { color: var(--mute); font-size: .92rem; margin: 0 0 14px }
+.converge { text-align: center; margin: 28px 0 10px; color: var(--mute); font-family: var(--mono); font-size: .85rem }
+.converge::before, .converge::after { content: ""; display: block; width: 2px; height: 28px; margin: 6px auto; background: linear-gradient(180deg, var(--ember), var(--magenta), var(--volt)) }
+.shared { max-width: 720px; margin: 0 auto }
+.node { position: relative; border: 1px solid var(--line); border-radius: 16px; padding: 14px 14px 12px; margin: 0 0 14px; background: var(--night-2) }
+.node + .node::before { content: ""; position: absolute; left: 28px; top: -15px; width: 2px; height: 14px; background: var(--line) }
+.node .head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; margin-bottom: 6px }
+.node .head h3 { font-size: 1.02rem }
+.node .id { font-family: var(--mono); color: var(--mute); font-size: .74rem }
+.node .what { color: var(--mute); font-size: .92rem; margin: 0 0 10px }
+.bubbles { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 10px }
+.bub { max-width: 92%; padding: 9px 12px; border-radius: 14px; font-size: .93rem; white-space: pre-wrap }
+.bub.bot { background: rgba(74,116,255,.16); border: 1px solid rgba(74,116,255,.35); align-self: flex-start; border-bottom-left-radius: 4px }
+.bub.me { background: rgba(255,107,61,.14); border: 1px solid rgba(255,107,61,.4); align-self: flex-end; border-bottom-right-radius: 4px }
+.bub.ui { background: var(--glass); border: 1px dashed var(--line); align-self: stretch; font-family: var(--mono); font-size: .82rem }
+.btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px }
+.btns span { font-size: .8rem; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--glass) }
+.note { font-size: .88rem; color: var(--mute); border-left: 2px solid var(--magenta); padding-left: 10px; margin: 8px 0 }
+.cm { margin-top: 8px; border-top: 1px dashed var(--line); padding-top: 8px }
+.cm .list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px }
+.cm .c { font-size: .9rem; background: var(--glass); border-radius: 10px; padding: 7px 10px; display: flex; gap: 8px; align-items: flex-start }
+.cm .c b { font-family: var(--mono); font-weight: 500; font-size: .78rem; color: var(--mute); white-space: nowrap }
+.cm .c .x { margin-left: auto; cursor: pointer; opacity: .5; background: none; border: 0; color: inherit; font-size: 1rem }
+.cm .c .x:hover { opacity: 1 }
+.cm form { display: flex; gap: 6px }
+.cm input { flex: 1; min-width: 0; background: var(--glass); border: 1px solid var(--line); color: var(--ink); border-radius: 10px; padding: 8px 10px; font: inherit; font-size: .92rem }
+.cm button, .toolbar button { background: var(--glass); border: 1px solid var(--line); color: var(--ink); border-radius: 10px; padding: 8px 12px; font: inherit; font-size: .9rem; cursor: pointer }
+.cm button:hover, .toolbar button:hover { border-color: var(--volt) }
+.toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 18px; font-size: .9rem; color: var(--mute) }
+.toolbar input { background: var(--glass); border: 1px solid var(--line); color: var(--ink); border-radius: 10px; padding: 7px 10px; font: inherit; font-size: .9rem; width: 150px }
+.crit { max-width: 860px; margin: 56px auto 0 }
+.crit h2 { font-size: 1.5rem; margin-bottom: 8px }
+.crit ol { padding-left: 22px } .crit li { margin: 8px 0 }
+.crit li b { font-weight: 600 }
+.status { font-family: var(--mono); font-size: .78rem; color: var(--mute); margin-left: auto }
+.after { max-width: 860px; margin: 40px auto 0 }
+.after .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px }
+.after .node { margin: 0 }
+.after .node + .node::before { display: none }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <img src="img/icon.png" alt="">
+    <div>
+      <h1>Onboarding, every message of it</h1>
+      <p>Three ways in, one shared middle, and what happens after. Click any card to leave a comment.</p>
+    </div>
+  </header>
+
+  <div class="legend">
+    <span class="badge built">built</span><span>works now, as shown</span>
+    <span class="badge changed">changed tonight</span><span>streamlined while mapping this</span>
+    <span class="badge proposed">proposed</span><span>not built, here to argue about</span>
+    <span class="badge gone">removed</span><span>used to be a step</span>
+  </div>
+
+  <div class="toolbar">
+    <span>Comment as</span><input id="author" placeholder="your name">
+    <button id="export">Copy all comments as markdown</button>
+    <span class="status" id="status"></span>
+  </div>
+
+  <section class="lanes" id="lanes"></section>
+  <div class="converge">all three land here</div>
+  <section class="shared" id="shared"></section>
+
+  <section class="after">
+    <h2 style="font-size:1.4rem;margin-bottom:10px">After onboarding: the things that used to be questions</h2>
+    <p class="sub" style="color:var(--mute);margin:0 0 14px">These were steps in the flow earlier tonight. Each one is now either inferred, lazy, or a command.</p>
+    <div class="grid" id="after"></div>
+  </section>
+
+  <section class="crit">
+    <h2>Where I think the streamlining should go next</h2>
+    <ol>
+      <li><b>Lead with the hook, not the setup.</b> The invite already says "Jess wants to see more of you." The first thing the bot asks should build on that: "Want to see more of Jess too?" (one tap, sets wantMore both ways), then "Who else?" The calendar and location asks come <i>after</i> the person has said something they care about.</li>
+      <li><b>Sources step is the long pole.</b> Pasting an ICS URL on a phone is the worst moment in the flow. Two fixes: a one-tap "connect Google Calendar" OAuth button on the manage page (we chose to defer OAuth, but it's the right call for the second week, not the first), and making the Android app the default source for location so nobody pastes anything.</li>
+      <li><b>Kill the porchlight question.</b> Default to "ask me each time". The drop-in flow already graduates to auto-yes after three yeses. The question only adds a decision.</li>
+      <li><b>App → Telegram should be a QR, not a paste.</b> The app-first path exists server-side now (register, then "Link Telegram" deep link). The app UI for it is not built; today the app still expects a URL pasted from Telegram. That's backwards for anyone who installs the app first.</li>
+      <li><b>Show one real nudge during onboarding.</b> Right after the invite is accepted, the bot could say "Here's the kind of thing I'll send: <i>You and Jess are both going to Sam's thing Saturday. Carpool?</i>" People understand the product in one message instead of reading the pitch.</li>
+      <li><b>Name confirm can disappear</b> for Telegram users, since Telegram already gave us a name. Confirm silently; let them rename with "call me X".</li>
+    </ol>
+  </section>
+</div>
+
+<script>
+// ---------- the flow, as data ----------
+const B = (t, btns) => ({ who: 'bot', t, btns })
+const ME = t => ({ who: 'me', t })
+const UI = t => ({ who: 'ui', t })
+
+const lanes = [
+  { id: 'invite', title: 'Starts from an invite link', sub: 'Jess typed /invite Eileen and sent her the link.', nodes: [
+    { id: 'invite-page', title: 'Landing page', status: 'changed', what: 'Served by the node at /i/<code>. Shows the inviter by name, explains in two lines, offers both paths. The code is one-time.',
+      msgs: [UI('Jess wants to see more of you.\n\nopportune is a small, private system that notices when hanging out would be cheap: you\'re both heading to the same thing, you\'re a block from their place and they\'re home, you\'re both free Thursday.\n\n[ Join via Telegram ]\nOr get the Android app and paste this code when it asks: 7Kp2xQ')],
+      note: 'Changed tonight: added the app path with the code. Proposed: the app link should be a deep link that carries the code so nobody types it.' },
+    { id: 'invite-choose', title: 'Pick a door', status: 'built', what: 'Telegram opens the bot with the code in /start. The app path registers against the node with the code.', msgs: [UI('→ Telegram: t.me/OpportuneRobot?start=7Kp2xQ\n→ App: POST /app/register { inviteCode: 7Kp2xQ }')] },
+  ]},
+  { id: 'telegram', title: 'Starts in Telegram', sub: 'Found the bot directly, or came from the invite page.', nodes: [
+    { id: 'tg-start', title: '/start', status: 'changed', what: 'Creates the person, binds the Telegram identity, remembers the invite code if there was one. One message, one tap.',
+      msgs: [ME('/start 7Kp2xQ'), B('Hi. Jess wants to see more of you, and asked me to help make that cheap.\n\nI\'m opportune: I notice when hanging out would be easy (same event, a block away, both free Thursday) and nudge you. Only people who opt in to each other. Nothing public.\n\nTap to confirm your name, or type a different one.', ['I\'m Eileen K'])],
+      note: 'Changed tonight: name confirm is a button instead of a typed reply. Proposed: skip it entirely for Telegram users.' },
+    { id: 'tg-linked', title: 'Invite accepted', status: 'built', what: 'Both edges created. Jess→Eileen has wantMore. Eileen→Jess does not, yet.', msgs: [B('Linked with Jess.')],
+      note: 'Proposed: ask "Want to see more of Jess too?" right here. It\'s the emotional hook and it\'s one tap.' },
+  ]},
+  { id: 'app', title: 'Starts in the app', sub: 'Installed the Android app first. Location and push live here.', nodes: [
+    { id: 'app-install', title: 'Install, open', status: 'proposed', what: 'Today the app asks for a URL pasted from Telegram. Proposed: first screen asks for an invite code (or scans the QR on the landing page), or "no code, start fresh".',
+      msgs: [UI('[ Paste or scan your invite code ]\n[ I don\'t have one ]')],
+      note: 'Server side is built: POST /app/register returns the ingest URL, a manage link and a Telegram deep link. The app screen for it is not built yet.' },
+    { id: 'app-register', title: 'Register with the node', status: 'changed', what: 'Creates the person, accepts the invite, connects the app as a source. The ingest URL is the app\'s credential from here on.',
+      msgs: [UI('POST /app/register\n← { ingestUrl, manageUrl, telegramLink, inviter: "Jess" }')] },
+    { id: 'app-perms', title: 'Permissions chain', status: 'built', what: 'Notifications → location → "allow all the time" with a rationale → physical activity. Then the foreground service starts and the push token registers.',
+      msgs: [UI('Allow notifications?  Allow location?  Allow all the time?  Physical activity?')],
+      note: 'Four system dialogs in a row is a lot. Background location is the one that matters; the others could be deferred until the first nudge or first porchlight toggle.' },
+    { id: 'app-link-tg', title: 'Link Telegram (optional)', status: 'changed', what: 'Button opens the bot with start=link-<token>; the bot binds the chat to the same person and resumes wherever onboarding left off.',
+      msgs: [UI('[ Link Telegram for chat ]'), ME('/start link-L4ns8T7Q'), B('Linked. Nudges can reach you here and in the app.')],
+      note: 'Without Telegram the app can still receive nudges and toggle porchlight, but can\'t chat ("who\'s around tonight?"). Proposed: a chat screen in the app, later.' },
+  ]},
+]
+
+const shared = [
+  { id: 'sources', title: 'Hook something up', status: 'built', what: 'Every source plugin renders itself here from its manifest. Each is one to three replies. "done" moves on. Can always come back with /sources.',
+    msgs: [B('Hook up what you like. Each is one step; you can add more later with /sources. Say "done" when finished.', ['Calendar (ICS link)', 'Location (phone app)', 'Event emails (Gmail)', 'Google Maps sharing', 'Tweets', 'opportune Android app', 'Matrix / Beeper']), ME('Calendar (ICS link)'), B('Paste your calendar\'s secret ICS address (Google: calendar settings → "Secret address in iCal format"). Several? Separate with spaces.'), ME('https://calendar.google.com/calendar/ical/…/basic.ics'), B('Calendar (ICS link) connected. Found 41 items so far.\n\nAdd another, or say "done".')],
+    note: 'This is the long pole. Seven buttons is too many for a first run. Proposed: show two (calendar, phone app) with "more…", and make the app the default location source.' },
+  { id: 'wantmore', title: 'Who do you want to see more of?', status: 'built', what: 'Free text, comma separated. Each name becomes a one-time invite link that says "X wants to see more of you." This is the growth loop.',
+    msgs: [B('Who do you want to see more of? Names, comma-separated. I\'ll make a one-time invite link for each. Or "skip".'), ME('Eileen, Sam, the Smiths'), B('One-time links (each says you want to see more of them):\n\nEileen: https://…/i/7Kp2xQ\nSam: https://…/i/mB91ac\nthe Smiths: https://…/i/Qq0lz2')],
+    note: 'Proposed: move this before sources. Also: if a name matches a phone contact, offer to text the link directly.' },
+  { id: 'porchlight', title: 'Drop-ins', status: 'built', what: 'Sets dropinDefault and dropinWindows in policy. Used by the drop-in flow when a wantMore friend is a block away.',
+    msgs: [B('Drop-ins at your place: when are they generally welcome?', ['Weekday evenings', 'Weekends', 'Ask me each time', 'Not really'])],
+    note: 'Proposed: remove. Default to "ask me each time"; trust graduation already offers auto-yes after three yeses.' },
+  { id: 'done', title: 'Done', status: 'changed', what: 'Onboarding state flips to done. From here the person is talking to their agent; the three optional things are named once.',
+    msgs: [B('That\'s it. I\'ll stay quiet unless something\'s worth it, and each morning I\'ll show you what I kept quiet about so you can correct me.\n\nTry: "who\'s around tonight?" or "I\'m home and open till 9".\n\nOptional, whenever: /home (or I\'ll infer it from where your phone sleeps), /phone (so friends\' contacts can find you), /manage for tiers and grants.')],
+    note: 'Proposed: send one example nudge right here so the product is understood in one message.' },
+]
+
+const after = [
+  { id: 'home', title: 'Home', status: 'changed', what: 'Was a step ("share your location"). Now inferred every 6h from where the phone sleeps (median of 1–5am fixes over 14 days, if 60% cluster). /home to set it by hand.', msgs: [B('I think I\'ve worked out where home is from where your phone sleeps. If that\'s wrong, /home to set it.', ['Looks right'])] },
+  { id: 'phone', title: 'Phone number', status: 'changed', what: 'Was a step. Now /phone, one tap. Only purpose: friends who have you in their contacts get told you joined.', msgs: [ME('/phone'), B('Share your number? Only used so friends who have you in their contacts get told you\'re here.', ['Share my number'])] },
+  { id: 'manage', title: 'Manage page', status: 'built', what: 'Magic link from /manage. Tiers, grants, the private travel slider, notes, sources, decision review, trusted-tier map. Nothing in onboarding asks about tiers; the defaults carry people.', msgs: [UI('/web/manage?token=… #people #sources #review #map #settings')] },
+  { id: 'digest', title: 'Morning digest', status: 'built', what: 'At the person\'s digest hour: what\'s coming up, and what the Judge stayed quiet about, each with "should\'ve told me".', msgs: [B('Morning. Coming up: Sam\'s birthday thing (Sat 7 PM).\n\nI stayed quiet about 2 things:\n1. Eileen and you were 400m apart at 2pm (quiet hours)\n2. …\n\nTap one if I should have told you.', ['Should\'ve told me #1', 'Should\'ve told me #2'])] },
+  { id: 'graduate', title: 'Trust graduation', status: 'built', what: 'Third yes to a drop-in veto nudge offers auto-yes for that friend. Michael\'s "it earns the right to ask for more."', msgs: [B('You\'ve said yes to Jess dropping by 3 times. Want me to just say yes for them from now on? You can always flip your porchlight to closed.', ['Yes, auto-yes them', 'Keep asking me'])] },
+  { id: 'suggest', title: 'Self-transcendence', status: 'changed', what: 'When a friend\'s agent asks something your node can\'t answer, the asking node forwards the suggestion and you get one nudge per plugin per week.', msgs: [B('Jess\'s agent asked about availability, but I couldn\'t answer: add a calendar source. Connect "Calendar (ICS link)" with /sources.', ['Not now'])] },
+]
+
+// ---------- render ----------
+const esc = s => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))
+const label = { built: 'built', changed: 'changed tonight', proposed: 'proposed', gone: 'removed' }
+function nodeHtml(n) {
+  const bubbles = (n.msgs || []).map(m => `<div class="bub ${m.who}">${esc(m.t)}${m.btns ? `<div class="btns">${m.btns.map(b => `<span>${esc(b)}</span>`).join('')}</div>` : ''}</div>`).join('')
+  return `<article class="node" id="n-${n.id}" data-node="${n.id}">
+    <div class="head"><h3>${esc(n.title)}</h3><span class="badge ${n.status}">${label[n.status]}</span><span class="id">${n.id}</span></div>
+    <p class="what">${esc(n.what)}</p>
+    <div class="bubbles">${bubbles}</div>
+    ${n.note ? `<p class="note">${esc(n.note)}</p>` : ''}
+    <div class="cm"><div class="list"></div><form><input placeholder="Leave a comment on this step…" required><button>Add</button></form></div>
+  </article>`
+}
+document.getElementById('lanes').innerHTML = lanes.map(l => `<div class="lane"><h2>${esc(l.title)}</h2><p class="sub">${esc(l.sub)}</p>${l.nodes.map(nodeHtml).join('')}</div>`).join('')
+document.getElementById('shared').innerHTML = shared.map(nodeHtml).join('')
+document.getElementById('after').innerHTML = after.map(nodeHtml).join('')
+const allNodes = [...lanes.flatMap(l => l.nodes), ...shared, ...after]
+
+// ---------- comments: node API when served by opportune, localStorage otherwise ----------
+const status = document.getElementById('status')
+const authorEl = document.getElementById('author')
+try { authorEl.value = localStorage.getItem('flow:author') || '' } catch {}
+authorEl.addEventListener('input', () => { try { localStorage.setItem('flow:author', authorEl.value) } catch {} })
+let comments = [], online = false
+const localLoad = () => { try { return JSON.parse(localStorage.getItem('flow:comments') || '[]') } catch { return [] } }
+const localSave = () => { try { localStorage.setItem('flow:comments', JSON.stringify(comments)) } catch {} }
+async function load() {
+  try { const r = await fetch('/api/flow-comments'); if (!r.ok) throw 0; comments = await r.json(); online = true; status.textContent = 'comments saved to the node' }
+  catch { comments = localLoad(); online = false; status.textContent = 'offline: comments stay in this browser, use export' }
+  render()
+}
+function render() {
+  for (const n of allNodes) {
+    const el = document.querySelector(`#n-${n.id} .list`)
+    el.innerHTML = comments.filter(c => c.node === n.id).map(c => `<div class="c"><b>${esc(c.author)}</b><span>${esc(c.text)}</span><button class="x" data-id="${c.id}" title="delete">×</button></div>`).join('')
+  }
+}
+document.addEventListener('submit', async e => {
+  e.preventDefault()
+  const node = e.target.closest('.node').dataset.node, input = e.target.querySelector('input')
+  const c = { id: Date.now().toString(36), node, text: input.value.trim(), author: authorEl.value.trim() || 'anon', at: new Date().toISOString() }
+  if (!c.text) return
+  if (online) { try { const r = await fetch('/api/flow-comments', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(c) }); Object.assign(c, await r.json()) } catch { online = false } }
+  comments.push(c); if (!online) localSave(); input.value = ''; render()
+})
+document.addEventListener('click', async e => {
+  const x = e.target.closest('.x'); if (!x) return
+  comments = comments.filter(c => c.id !== x.dataset.id)
+  if (online) fetch(`/api/flow-comments/${x.dataset.id}`, { method: 'DELETE' }).catch(() => {}); else localSave()
+  render()
+})
+document.getElementById('export').addEventListener('click', async () => {
+  const byNode = {}
+  for (const c of comments) (byNode[c.node] ||= []).push(c)
+  const md = allNodes.filter(n => byNode[n.id]).map(n => `## ${n.title} (${n.id})\n` + byNode[n.id].map(c => `- **${c.author}**: ${c.text}`).join('\n')).join('\n\n') || '(no comments yet)'
+  try { await navigator.clipboard.writeText(md); status.textContent = 'copied' } catch { prompt('Copy this:', md) }
+})
+load()
+</script>
+</body>
+</html>

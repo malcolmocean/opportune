@@ -17,6 +17,29 @@ export function startCron(ctx) {
     }
   }, 'cron-triggers')
   every(10 * 60e3, async () => ctx.digest.tick(), 'digest')
+  every(6 * 3600e3, async () => inferHomes(ctx), 'infer-home')
+}
+
+// For people without a declared home: the median of overnight (1am–5am local) fixes over the last 14 days, if there are enough.
+export function inferHomes(ctx) {
+  let n = 0
+  for (const p of ctx.people.all()) {
+    if (ctx.people.home(p.id)) continue
+    const since = new Date(Date.now() - 14 * 864e5).toISOString()
+    const pts = ctx.observations.recent(p.id, { kinds: ['location'], since, limit: 2000 }).filter(o => {
+      const h = Number(new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: p.tz }).format(new Date(o.at)))
+      return h >= 1 && h < 5 && o.data?.lat
+    })
+    if (pts.length < 5) continue
+    const med = a => { const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)] }
+    const lat = med(pts.map(o => o.data.lat)), lng = med(pts.map(o => o.data.lng))
+    const near = pts.filter(o => ctx.geo.distanceM({ lat, lng }, o.data) < 200).length
+    if (near / pts.length < 0.6) continue   // sleeps in too many places; don't guess
+    ctx.people.addPlace(p.id, { name: 'home', lat, lng, radiusM: 120 })
+    n++
+    ctx.nudges.send(p.id, { text: `I think I've worked out where home is from where your phone sleeps. If that's wrong, /home to set it.`, actions: [{ key: 'yes', label: 'Looks right' }] }).catch(() => {})
+  }
+  return n
 }
 
 // Daily digest at the person's chosen hour: things worth knowing + what the judge suppressed.

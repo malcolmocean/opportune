@@ -43,6 +43,31 @@ app.post('/ingest/:source/:token', async (req, res) => {
 })
 app.get('/ingest/:source/:token', (req, res) => res.json({ ok: true, source: req.params.source }))   // for apps that probe
 
+// ---- app-first start: the Android app registers itself, optionally with an invite code ----
+// Returns the ingest URL (which is the app's credential), a manage link, and a Telegram deep link that binds chat to the same person.
+app.post('/app/register', async (req, res) => {
+  const { inviteCode, displayName, device } = req.body || {}
+  const inv = inviteCode && ctx.people.peekInvite(inviteCode)
+  const p = ctx.people.create({ displayName: displayName || inv?.invitee_name || 'New person' })
+  ctx.people.update(p.id, { onboarding: { step: 'sources', via: 'app', pendingInvite: inv ? inviteCode : null } })
+  if (inv) ctx.people.acceptInvite(inviteCode, p.id)
+  const sc = ctx.sources.connect(p.id, 'opportuneApp', { device: device || {} })
+  const { manageUrl } = await import('./web/routes.js')
+  const tg = ctx.plugins.channels.telegram?.deepLink?.(ctx, `link-${sc.token}`)
+  res.json({ personId: p.id, ingestUrl: ctx.sources.ingestUrl(sc), manageUrl: manageUrl(ctx, p.id), telegramLink: tg, inviter: inv ? ctx.people.get(inv.inviter_id)?.display_name : null })
+})
+
+// ---- inline comments for the onboarding flow page (site/onboarding.html); kv-backed, no auth, dev only ----
+app.get('/api/flow-comments', (_req, res) => res.json(ctx.db.kvGet('flowComments') || []))
+app.post('/api/flow-comments', (req, res) => {
+  const list = ctx.db.kvGet('flowComments') || []
+  const { node, text, author } = req.body || {}
+  if (!node || !text) return res.status(400).json({ error: 'node and text required' })
+  const c = { id: Date.now().toString(36), node, text: String(text).slice(0, 2000), author: String(author || 'anon').slice(0, 40), at: new Date().toISOString() }
+  list.push(c); ctx.db.kvSet('flowComments', list); res.json(c)
+})
+app.delete('/api/flow-comments/:id', (req, res) => { ctx.db.kvSet('flowComments', (ctx.db.kvGet('flowComments') || []).filter(c => c.id !== req.params.id)); res.json({ ok: true }) })
+
 // ---- invites land here; hand off to a channel's onboarding ----
 app.get('/i/:code', (req, res) => {
   const inv = ctx.people.peekInvite(req.params.code)

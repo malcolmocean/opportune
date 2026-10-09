@@ -19,15 +19,26 @@ export default {
     bot.command('start', async c => {
       const code = c.match?.trim()
       let p = whoami(c)
+      // app-first people arrive with link-<sourceToken>: bind this Telegram account to the person the app created
+      if (code?.startsWith('link-')) {
+        const sc = ctx.sources.byToken(code.slice(5))
+        if (!sc) return c.reply('That link has expired. Open the app and tap "Link Telegram" again.')
+        if (p && p.id !== sc.person_id) return c.reply(`This Telegram account is already set up as ${p.display_name}. Use the app's manage page to merge, or start fresh in the app.`)
+        ctx.people.bind(sc.person_id, 'telegram', c.from.id, { username: c.from.username })
+        p = ctx.people.get(sc.person_id)
+        if (p.onboarding?.step && p.onboarding.step !== 'done') return advance(ctx, c, p, p.onboarding.step)
+        return c.reply(`Linked. Nudges can reach you here and in the app. Say "who's around tonight?" anytime.`)
+      }
       if (!p) {
         p = ctx.people.create({ displayName: [c.from.first_name, c.from.last_name].filter(Boolean).join(' ') })
         ctx.people.bind(p.id, 'telegram', c.from.id, { username: c.from.username })
         const inv = code && ctx.people.peekInvite(code)
         const inviter = inv && ctx.people.get(inv.inviter_id)
         ctx.people.update(p.id, { onboarding: { step: 'name', pendingInvite: inv ? code : null } })
+        const kb = new InlineKeyboard().text(`I'm ${p.display_name}`, 'ob:name:ok')
         await c.reply(inviter
-          ? `Hi. ${inviter.display_name} wants to see more of you, and asked me to help make that cheap.\n\nI'm opportune: I notice when hanging out would be easy (same event, a block away, both free Thursday) and nudge you. Only people who opt in to each other. Nothing public.\n\nWhat should I call you? (${p.display_name}?)`
-          : `Hi. I'm opportune: I notice when hanging out with your people would be cheap, and nudge you.\n\nWhat should I call you? (${p.display_name}?)`)
+          ? `Hi. ${inviter.display_name} wants to see more of you, and asked me to help make that cheap.\n\nI'm opportune: I notice when hanging out would be easy (same event, a block away, both free Thursday) and nudge you. Only people who opt in to each other. Nothing public.\n\nTap to confirm your name, or type a different one.`
+          : `Hi. I'm opportune: I notice when hanging out with your people would be cheap, and nudge you.\n\nTap to confirm your name, or type a different one.`, { reply_markup: kb })
         return
       }
       if (code) {
@@ -54,6 +65,15 @@ export default {
       const { url } = ctx.people.invite(p.id, { inviteeName: name })
       c.reply(`One-time link for ${name}:\n${url}\n\nIt says you want to see more of them. Send it however you like.`)
     })
+    bot.command('phone', async c => {
+      const p = whoami(c); if (!p) return
+      c.reply(`Share your number? Only used so friends who have you in their contacts get told you're here.`, { reply_markup: { keyboard: [[{ text: 'Share my number', request_contact: true }]], one_time_keyboard: true, resize_keyboard: true } })
+    })
+    bot.command('home', async c => {
+      const p = whoami(c); if (!p) return
+      c.reply(`Share your home location (📎 → Location) and I'll use it for drop-ins. If you skip this, I'll work it out from where your phone sleeps.`)
+      ctx.people.update(p.id, { onboarding: { ...(p.onboarding || {}), awaitingHome: true } })
+    })
     bot.command('porchlight', async c => {
       const p = whoami(c); if (!p) return
       c.reply('Drop-ins right now?', { reply_markup: new InlineKeyboard().text('Open', 'pl:open').text('Ask me', 'pl:ask').text('Closed', 'pl:closed') })
@@ -75,10 +95,11 @@ export default {
     bot.on('message:location', async c => {
       const p = whoami(c); if (!p) return
       const { latitude: lat, longitude: lng } = c.message.location
-      if (p.onboarding?.step === 'home') {
+      if (p.onboarding?.awaitingHome) {
         ctx.people.addPlace(p.id, { name: 'home', lat, lng, radiusM: 120 })
+        ctx.people.update(p.id, { onboarding: { ...p.onboarding, awaitingHome: false } })
         await ctx.observations.ingest(p.id, 'manual', [{ kind: 'location', data: { lat, lng, placeName: 'home' } }])
-        return advance(ctx, c, p, 'sources')
+        return c.reply('Home set.')
       }
       await ctx.observations.ingest(p.id, 'manual', [{ kind: 'location', data: { lat, lng } }])
       c.reply('Got it.')
@@ -89,7 +110,6 @@ export default {
       if (c.message.contact.user_id === c.from.id) {
         ctx.people.bind(p.id, 'phone', c.message.contact.phone_number)
         await c.reply('Got it.', { reply_markup: { remove_keyboard: true } })
-        if (p.onboarding?.step === 'phone') return advance(ctx, c, p, 'home')
       }
     })
 
@@ -138,25 +158,20 @@ export default {
 // ---------- onboarding ----------
 async function advance(ctx, c, p, step) {
   ctx.people.update(p.id, { onboarding: { ...(ctx.people.get(p.id).onboarding || {}), step } })
-  if (step === 'phone') return c.reply(`Share your phone number? Only used so friends who have you in their contacts get told you're here. Or say "skip".`, { reply_markup: { keyboard: [[{ text: 'Share my number', request_contact: true }]], one_time_keyboard: true, resize_keyboard: true } })
-  if (step === 'home') return c.reply(`Where's home? Share a location (📎 → Location), or say "skip".`)
   if (step === 'sources') return sourcesMenu(ctx, c, ctx.people.get(p.id), true)
   if (step === 'wantmore') return c.reply(`Who do you want to see more of? Names, comma-separated. I'll make a one-time invite link for each. Or "skip".`)
   if (step === 'porchlight') return c.reply(`Drop-ins at your place: when are they generally welcome?`, { reply_markup: new InlineKeyboard().text('Weekday evenings', 'ob:pl:evenings').text('Weekends', 'ob:pl:weekends').row().text('Ask me each time', 'ob:pl:ask').text('Not really', 'ob:pl:closed') })
   if (step === 'done') {
     ctx.people.update(p.id, { onboarding: { step: 'done' } })
-    return c.reply(`That's it. I'll stay quiet unless something's worth it, and each morning I'll show you what I kept quiet about so you can correct me.\n\nTry: "who's around tonight?" or "I'm home and open till 9". Tiers, grants and sources live at /manage.`)
+    return c.reply(`That's it. I'll stay quiet unless something's worth it, and each morning I'll show you what I kept quiet about so you can correct me.\n\nTry: "who's around tonight?" or "I'm home and open till 9".\n\nOptional, whenever: /home (or I'll infer it from where your phone sleeps), /phone (so friends' contacts can find you), /manage for tiers and grants.`)
   }
 }
 async function onboard(ctx, c, p, text) {
   const ob = p.onboarding
   if (ob.step === 'name') {
     if (text && !/^(yes|yep|sure|ok|that's fine|y)$/i.test(text)) ctx.people.update(p.id, { displayName: text.replace(/[^\w\s'.-]/g, '').slice(0, 40) })
-    if (ob.pendingInvite) { const inviter = ctx.people.acceptInvite(ob.pendingInvite, p.id); if (inviter) await c.reply(`Linked with ${inviter.display_name}.`) }
-    return advance(ctx, c, p, 'phone')
+    return finishName(ctx, c, ctx.people.get(p.id))
   }
-  if (ob.step === 'phone') { if (/skip/i.test(text)) return advance(ctx, c, p, 'home'); return c.reply('Tap the button to share, or say "skip".') }
-  if (ob.step === 'home') { if (/skip/i.test(text)) return advance(ctx, c, p, 'sources'); return c.reply('Share a location (📎 → Location) or say "skip".') }
   if (ob.step === 'sources') { if (/skip|done|next/i.test(text)) return advance(ctx, c, p, 'wantmore'); if (ob.sourceSetup) return sourceStep(ctx, c, p, text); return c.reply('Pick one above, or "done".') }
   if (ob.step === 'wantmore') {
     if (!/^skip$/i.test(text)) {
@@ -168,7 +183,13 @@ async function onboard(ctx, c, p, text) {
   }
   if (ob.step === 'porchlight') return c.reply('Tap one above.')
 }
+async function finishName(ctx, c, p) {
+  const ob = p.onboarding || {}
+  if (ob.pendingInvite) { const inviter = ctx.people.acceptInvite(ob.pendingInvite, p.id); if (inviter) await c.reply(`Linked with ${inviter.display_name}.`) }
+  return advance(ctx, c, p, 'sources')
+}
 async function onboardChoice(ctx, c, p, a, b) {
+  if (a === 'name' && b === 'ok') return finishName(ctx, c, p)
   if (a === 'pl') {
     const pol = ctx.people.policy(p.id)
     const map = { evenings: { dropinDefault: 'open', dropinWindows: [{ days: [1, 2, 3, 4, 5], start: 18, end: 22 }] }, weekends: { dropinDefault: 'open', dropinWindows: [{ days: [0, 6], start: 10, end: 20 }] }, ask: { dropinDefault: 'ask', dropinWindows: [] }, closed: { dropinDefault: 'closed', dropinWindows: [] } }

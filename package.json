@@ -6,8 +6,10 @@
   "scripts": {
     "dev": "node --watch --env-file-if-exists=.env server.js",
     "start": "node --env-file-if-exists=.env server.js",
-    "test": "node --test tests/",
-    "cron": "node --env-file-if-exists=.env scripts/cron.js"
+    "test": "node --test \"tests/*.test.js\"",
+    "cron": "node --env-file-if-exists=.env scripts/cron.js",
+    "seed": "node --env-file-if-exists=.env scripts/seed.js",
+    "tunnel": "cloudflared tunnel --url http://localhost:${PORT:-3400}"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",

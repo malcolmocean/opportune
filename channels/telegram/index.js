@@ -81,6 +81,15 @@ export default {
       c.reply('Got it.')
     })
 
+    bot.on('message:contact', async c => {
+      const p = whoami(c); if (!p) return
+      if (c.message.contact.user_id === c.from.id) {
+        ctx.people.bind(p.id, 'phone', c.message.contact.phone_number)
+        await c.reply('Got it.', { reply_markup: { remove_keyboard: true } })
+        if (p.onboarding?.step === 'phone') return advance(ctx, c, p, 'home')
+      }
+    })
+
     bot.on('message:text', async c => {
       const p = whoami(c)
       if (!p) return c.reply('Say /start to begin.')
@@ -126,6 +135,7 @@ export default {
 // ---------- onboarding ----------
 async function advance(ctx, c, p, step) {
   ctx.people.update(p.id, { onboarding: { ...(ctx.people.get(p.id).onboarding || {}), step } })
+  if (step === 'phone') return c.reply(`Share your phone number? Only used so friends who have you in their contacts get told you're here. Or say "skip".`, { reply_markup: { keyboard: [[{ text: 'Share my number', request_contact: true }]], one_time_keyboard: true, resize_keyboard: true } })
   if (step === 'home') return c.reply(`Where's home? Share a location (📎 → Location), or say "skip".`)
   if (step === 'sources') return sourcesMenu(ctx, c, ctx.people.get(p.id), true)
   if (step === 'wantmore') return c.reply(`Who do you want to see more of? Names, comma-separated. I'll make a one-time invite link for each. Or "skip".`)
@@ -140,8 +150,9 @@ async function onboard(ctx, c, p, text) {
   if (ob.step === 'name') {
     if (text && !/^(yes|yep|sure|ok|that's fine|y)$/i.test(text)) ctx.people.update(p.id, { displayName: text.replace(/[^\w\s'.-]/g, '').slice(0, 40) })
     if (ob.pendingInvite) { const inviter = ctx.people.acceptInvite(ob.pendingInvite, p.id); if (inviter) await c.reply(`Linked with ${inviter.display_name}.`) }
-    return advance(ctx, c, p, 'home')
+    return advance(ctx, c, p, 'phone')
   }
+  if (ob.step === 'phone') { if (/skip/i.test(text)) return advance(ctx, c, p, 'home'); return c.reply('Tap the button to share, or say "skip".') }
   if (ob.step === 'home') { if (/skip/i.test(text)) return advance(ctx, c, p, 'sources'); return c.reply('Share a location (📎 → Location) or say "skip".') }
   if (ob.step === 'sources') { if (/skip|done|next/i.test(text)) return advance(ctx, c, p, 'wantmore'); if (ob.sourceSetup) return sourceStep(ctx, c, p, text); return c.reply('Pick one above, or "done".') }
   if (ob.step === 'wantmore') {

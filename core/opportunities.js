@@ -8,7 +8,7 @@ export function makeOpportunities(db, ctx) {
   const Op = {
     async add(triggerId, o) {
       const row = {
-        id: uid(), trigger_id: triggerId, kind: o.kind, participants: o.participants, primary_id: o.primary || o.participants[0],
+        id: uid(), trigger_id: triggerId, kind: o.kind, participants: o.participants, primary_id: o.primary === undefined ? o.participants[0] : o.primary,
         summary: o.summary, evidence: o.evidence || [], dedupe_key: o.dedupeKey || null,
         expires_at: o.expiresAt || new Date(Date.now() + 3 * 3600e3).toISOString(), status: 'pending', created_at: now(),
       }

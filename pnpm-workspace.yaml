@@ -2,3 +2,6 @@ allowBuilds:
   '@firebase/util': set this to true or false
   better-sqlite3: set this to true or false
   protobufjs: set this to true or false
+onlyBuiltDependencies:
+  - protobufjs
+  - "@firebase/util"

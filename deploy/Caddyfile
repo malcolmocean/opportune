@@ -1,0 +1,4 @@
+{$OPPORTUNE_HOST} {
+	reverse_proxy localhost:3400
+	encode gzip
+}

@@ -19,12 +19,5 @@
     "imapflow": "^2.2.10",
     "mailparser": "^3.9.36",
     "node-ical": "^0.20.1"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "protobufjs",
-      "@firebase/util",
-      "firebase-admin"
-    ]
   }
 }

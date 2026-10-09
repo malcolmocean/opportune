@@ -40,11 +40,12 @@ export function makeObservations(db, ctx) {
         } catch (e) { L.error(`trigger ${t.id} failed:`, e) }
       }
     },
-    latest(personId, kind, { within } = {}) {
-      const r = within
-        ? db.get('select * from observations where person_id = ? and kind = ? and at > ? order by at desc limit 1', personId, kind, new Date(Date.now() - within).toISOString())
-        : db.get('select * from observations where person_id = ? and kind = ? order by at desc limit 1', personId, kind)
-      return parseRow(r, ['data', 'raw'])
+    // activeOnly: only rows whose `until` is null or in the future (statuses, events). rowid breaks same-ms ties.
+    latest(personId, kind, { within, activeOnly } = {}) {
+      const conds = ['person_id = ?', 'kind = ?'], p = [personId, kind]
+      if (within) { conds.push('at > ?'); p.push(new Date(Date.now() - within).toISOString()) }
+      if (activeOnly) { conds.push('(until is null or until > ?)'); p.push(now()) }
+      return parseRow(db.get(`select * from observations where ${conds.join(' and ')} order by at desc, rowid desc limit 1`, ...p), ['data', 'raw'])
     },
     recent(personId, { kinds, since, until, limit = 50 } = {}) {
       const conds = ['person_id = ?'], p = [personId]

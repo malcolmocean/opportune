@@ -12,8 +12,8 @@ Every plugin function receives `ctx` first:
 | ctx member | what |
 |---|---|
 | `ctx.db` | sqlite wrapper: `get/all/run/insert/kvGet/kvSet` (see `core/db.js`) |
-| `ctx.people` | `addContacts(ownerId, [{name, emails, phones}])`, `contactName(ownerId, {email})`, `ownersWithContact('email', v)`, `get(id)`, `all()`, `friendsOf(id)`, `rel(from,to)` (has `.effectiveGrants`), `setRel`, `identities(id)`, `bind`, `places(id)`, `addPlace`, `invite`, `policy(id)`, `nodeUrl` |
-| `ctx.observations` | `ingest(personId, sourceId, obs[])`, `latest(personId, kind, {within})`, `recent(personId, {kinds, since, limit})`, `eventsIn(personId, startIso, endIso)` |
+| `ctx.people` | `addContacts(ownerId, [{name, emails, phones}])`, `contactName(ownerId, {email})`, `ownersWithContact('email', v)`, `get(id)`, `all()`, `friendsOf(id)` (outgoing edges), `connections(id)` (either direction, with `.outgoing`/`.incoming`), `home(id)`, `rel(from,to)` (has `.effectiveGrants`), `setRel`, `identities(id)`, `bind`, `places(id)`, `addPlace`, `invite`, `policy(id)`, `nodeUrl` |
+| `ctx.observations` | `ingest(personId, sourceId, obs[])`, `latest(personId, kind, {within, activeOnly})`, `recent(personId, {kinds, since, limit})`, `eventsIn(personId, startIso, endIso)` |
 | `ctx.query` | `ask({from,to,kind,text,window})`, `fanout(from, {...})` |
 | `ctx.nudges` | `send(personId, {text, actions, decisionId})`, `respond(nudgeId, actionKey)` |
 | `ctx.judge` | `rate(decisionId, 'good'|'bad', note)` |

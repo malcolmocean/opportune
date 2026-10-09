@@ -123,6 +123,12 @@ export function makePeople(db, env, events) {
 
     // places
     places(ownerId) { return db.all('select * from places where owner_id = ? or shared = 1', ownerId) },
+    home(ownerId) { return db.get(`select * from places where owner_id = ? and name = 'home' order by created_at desc limit 1`, ownerId) || null },
+    // friends in either direction: [{ ...person, outgoing: rel|null, incoming: rel|null }]
+    connections(personId) {
+      const ids = new Set([...db.all('select to_id id from relationships where from_id = ?', personId), ...db.all('select from_id id from relationships where to_id = ?', personId)].map(r => r.id))
+      return [...ids].map(id => ({ ...P.get(id), outgoing: P.rel(personId, id), incoming: P.rel(id, personId) }))
+    },
     addPlace(ownerId, { name, lat, lng, radiusM = 150, shared = false }) {
       const row = { id: uid(), owner_id: ownerId, name, lat, lng, radius_m: radiusM, shared: shared ? 1 : 0, created_at: now() }
       db.insert('places', row); return row

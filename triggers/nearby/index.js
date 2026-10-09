@@ -14,8 +14,8 @@ export default {
       if (!theirs?.data?.lat) continue
       const d = ctx.geo.distanceM(me, theirs.data)
       if (d > this.radiusM) continue
-      const bothHome = me.placeName === 'home' && theirs.data.placeName === 'home'
-      if (bothHome) continue  // neighbours at home is not news
+      // someone at home + the other nearby is porchlightProximity's job (drop-in flow); both home is not news
+      if (me.placeName === 'home' || theirs.data.placeName === 'home') continue
       const hourKey = new Date().toISOString().slice(0, 13)
       out.push({
         kind: 'nearby', participants: [person.id, f.id], primary: null,   // tell both; judge decides each side

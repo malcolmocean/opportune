@@ -9,7 +9,7 @@ export default {
     const me = o.data
     if (!me?.lat) return []
     const out = []
-    for (const f of ctx.people.friendsOf(person.id)) {
+    for (const f of ctx.people.connections(person.id)) {   // either direction, so a shadow (Maps contact) moving near me counts too
       const theirs = ctx.observations.latest(f.id, 'location', { within: FRESH_MS })
       if (!theirs?.data?.lat) continue
       const d = ctx.geo.distanceM(me, theirs.data)

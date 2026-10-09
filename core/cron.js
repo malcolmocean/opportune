@@ -23,7 +23,7 @@ export function startCron(ctx) {
 export function makeDigest(db, ctx) {
   return {
     async tick() {
-      for (const p of ctx.people.all()) {
+      for (const p of ctx.people.all().filter(p => p.onboarding?.step === 'done')) {
         const hour = Number(new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: p.tz }).format(new Date()))
         const want = p.policy?.digestHour ?? 9
         const key = `digest:${p.id}`, last = db.kvGet(key)

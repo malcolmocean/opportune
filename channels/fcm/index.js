@@ -67,7 +67,16 @@ export async function handleAppPayload(ctx, person, body, config = {}) {
     else await ctx.nudges.respond(nudgeId, key, body.nudgeResponse.note)
   }
   if (body.status && PORCHLIGHT.has(body.status.porchlight)) {
-    out.push({ kind: 'status', at: body.status.at || new Date().toISOString(), until: new Date(Date.now() + PORCHLIGHT_HOURS * 3600e3).toISOString(), data: { porchlight: body.status.porchlight, note: body.status.note || null } })
+    // { porchlight, hours? | until?, note? }  default window PORCHLIGHT_HOURS; 'closed' with no duration lasts till tomorrow morning
+    const hours = Number(body.status.hours) > 0 ? Math.min(Number(body.status.hours), 24) : null
+    const until = body.status.until && !isNaN(Date.parse(body.status.until)) ? new Date(body.status.until).toISOString()
+      : new Date(Date.now() + (hours ?? (body.status.porchlight === 'closed' ? 12 : PORCHLIGHT_HOURS)) * 3600e3).toISOString()
+    out.push({ kind: 'status', at: body.status.at || new Date().toISOString(), until, data: { porchlight: body.status.porchlight, note: body.status.note || null } })
+  }
+  if (body.home && Number.isFinite(body.home.lat) && Number.isFinite(body.home.lng)) {
+    ctx.db.run(`delete from places where owner_id = ? and name = 'home'`, person.id)
+    ctx.people.addPlace(person.id, { name: 'home', lat: body.home.lat, lng: body.home.lng, radiusM: body.home.radiusM || 120 })
+    ctx.log('fcm').info(`${person.display_name} set home from the app`)
   }
   if (Array.isArray(body.contacts)) {
     const n = ctx.people.addContacts(person.id, body.contacts)

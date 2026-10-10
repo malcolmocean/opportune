@@ -16,6 +16,12 @@ export function makeSources(db, ctx) {
     },
     get(id) { return parseRow(db.get('select * from source_configs where id = ?', id), ['config']) },
     ingestUrl(sc) { return `${ctx.people.nodeUrl}/ingest/${sc.source_id}/${sc.token}` },
+    // short code the native app can claim (POST /app/claim) instead of pasting the URL; 15 min
+    linkCode(sc) {
+      const code = randomBytes(4).toString('base64url').replace(/[^A-Za-z0-9]/g, '').slice(0, 6).toUpperCase().padEnd(6, 'X')
+      db.kvSet(`applink:${code}`, { id: sc.id, exp: Date.now() + 15 * 60e3 })
+      return code
+    },
     // Called by POST /ingest/:source/:token
     async ingest(sourceId, token, payload, req) {
       const sc = S.byToken(token)

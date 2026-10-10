@@ -208,7 +208,7 @@ async function beginSource(ctx, c, p, sourceId) {
   const s = ctx.plugins.sources[sourceId]
   if (!s) return
   ctx.people.update(p.id, { onboarding: { ...(p.onboarding || {}), sourceSetup: { sourceId, idx: 0, config: {} } } })
-  if (!s.setup?.length) return sourceStep(ctx, c, ctx.people.get(p.id), null)
+  if (!s.setup?.length || s.setup.every(x => x.type === 'install-app')) return sourceStep(ctx, c, ctx.people.get(p.id), null)
   await c.reply(`*${s.name}*\n${s.description}`, { parse_mode: 'Markdown' })
   return askSetupStep(ctx, c, ctx.people.get(p.id))
 }
@@ -232,7 +232,10 @@ async function sourceStep(ctx, c, p, text) {
   const sc = ctx.sources.connect(p.id, s.id, ss.config)
   ctx.people.update(p.id, { onboarding: { ...p.onboarding, sourceSetup: null } })
   let msg = `${s.name} connected.`
-  if (s.ingest) {
+  const installStep = s.setup?.find(x => x.type === 'install-app')
+  if (installStep) {
+    msg += `\n\n${installStep.label}\n\nCode: ${ctx.sources.linkCode(sc)}   (15 min)\n\nOr paste this URL into it:\n${ctx.sources.ingestUrl(sc)}`
+  } else if (s.ingest) {
     const instr = s.setup?.find(x => x.type === 'choice')?.instructions?.[ss.config.app] || ''
     msg += `\n\n${instr}\n\nYour URL:\n${ctx.sources.ingestUrl(sc)}`
   }

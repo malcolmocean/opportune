@@ -69,7 +69,7 @@ function build(ctx, { a, aLoc, f, home, distanceM }) {
     kind: 'dropin',
     participants: [a.id, f.id],
     primary: a.id,
-    summary: `${a.display_name} is ${ctx.geo.fmtDistance(distanceM)} from ${f.display_name}'s place${where} and ${f.display_name} is home. ${f.display_name}'s porchlight is ${light.state}${light.source === 'status' ? '' : ` (${light.source})`}.`,
+    summary: `${a.display_name} is ${ctx.geo.fmtDistance(distanceM)} from ${f.display_name}'s place${where} and ${f.display_name} is home. ${f.display_name}'s porchlight is ${light.state}${light.source === 'status' ? (light.until ? ` for another ${Math.max(0, Math.round((new Date(light.until) - Date.now()) / 60000))} min` : '') : ` (${light.source})`}.`,
     evidence: [
       { kind: 'location', who: a.id, at: aLoc.at, placeName: aLoc.data.placeName || null, distanceToHomeM: Math.round(distanceM), ageMin: ctx.geo.minutesAgo(aLoc.at) },
       { kind: 'location', who: f.id, at: fp.loc.at, placeName: 'home', ageMin: ctx.geo.minutesAgo(fp.loc.at) },

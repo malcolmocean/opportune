@@ -9,7 +9,7 @@ export default {
   repo: 'https://github.com/malcolmocean/opportune/tree/main/apps/android',
   kinds: ['location', 'motion', 'status'],
   setup: [
-    { key: 'installed', type: 'install-app', label: 'Install the opportune Android app (APK from the project\'s releases, or build apps/android). Say "ok" once it\'s installed and I\'ll give you the URL to paste into it.' },
+    { key: 'installed', type: 'install-app', label: 'Install the opportune Android app, open it, choose "I already use the Telegram bot", and type this code.' },
   ],
   ingest(ctx, person, config, body) { return handleAppPayload(ctx, person, body, config) },
 }

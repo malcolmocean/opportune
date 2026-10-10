@@ -2,7 +2,7 @@
 # Usage: deploy/deploy.sh <host-ip> [host-name]   e.g. deploy/deploy.sh 157.230.169.110 157.230.169.110.sslip.io
 # Rsyncs this checkout to /opt/opportune on the box, installs deps, (re)starts the service, configures Caddy for HTTPS.
 set -eu
-IP=${1:?ip}; HOST=${2:-$IP.sslip.io}
+IP=${1:?ip}; HOST=${2:-$IP.sslip.io}; case "$HOST" in *sslip.io*) ;; *) HOST="$HOST, $IP.sslip.io";; esac
 cd "$(dirname "$0")/.."
 rsync -az --delete \
   --exclude node_modules --exclude 'data/' --exclude '.venv' --exclude '__pycache__' --exclude '.git' \

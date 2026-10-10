@@ -1,0 +1,45 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>opportune admin</title>
+<link rel="icon" href="/web/icon.png">
+<style>
+:root{--bg:#090b22;--card:#11143a;--line:rgba(190,196,255,.16);--ink:#eeedf8;--mute:#a4a8cf;--ok:#4ad99a;--bad:#ff6b3d;--volt:#4a74ff;color-scheme:dark}
+:root[data-theme=light]{--bg:#f6f5ff;--card:#fff;--line:rgba(20,24,80,.14);--ink:#15173a;--mute:#5a5e8a;color-scheme:light}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,sans-serif;padding:20px 16px 60px;max-width:1100px;margin:auto}
+h1{font-size:1.4rem;margin:0 0 4px}.mute{color:var(--mute)}
+.totals{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0 18px}.totals div{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px 12px}.totals b{display:block;font-size:1.3rem}
+.p{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin:0 0 10px;display:grid;grid-template-columns:1fr;gap:6px}
+.p .head{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}.p .head b{font-size:1.05rem}
+.tag{font-size:.75rem;padding:2px 8px;border-radius:999px;border:1px solid var(--line);font-family:ui-monospace,monospace}
+.tag.ok{border-color:var(--ok);color:var(--ok)}.tag.bad{border-color:var(--bad);color:var(--bad)}.tag.dim{color:var(--mute)}
+.row{display:flex;gap:14px;flex-wrap:wrap;font-size:.9rem}.row span b{font-weight:600}
+.src{display:flex;gap:6px;flex-wrap:wrap}
+table{width:100%;border-collapse:collapse;font-size:.85rem;margin-top:16px}td,th{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--mute);font-weight:500}
+</style></head><body>
+<h1>opportune admin</h1><div class="mute" id="meta">loading…</div>
+<div class="totals" id="totals"></div>
+<div id="people"></div>
+<h2 style="font-size:1.1rem;margin:22px 0 4px">Recent opportunities</h2>
+<table id="opps"><thead><tr><th>when</th><th>kind</th><th>summary</th><th>status</th></tr></thead><tbody></tbody></table>
+<script>
+const token = new URLSearchParams(location.search).get('token')
+const ago = iso => { if (!iso) return 'never'; const m = Math.round((Date.now() - new Date(iso)) / 60000); return m < 60 ? m + 'm ago' : m < 1440 ? Math.round(m / 60) + 'h ago' : Math.round(m / 1440) + 'd ago' }
+const esc = s => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))
+fetch('/api/admin/overview', { headers: { 'x-admin-token': token || '' } }).then(r => r.json()).then(d => {
+  if (d.error) { document.getElementById('meta').textContent = d.error; return }
+  document.getElementById('meta').textContent = `${d.node} · llm ${d.llm ? 'on' : 'off'} · ${new Date(d.now).toLocaleString()}`
+  const t = d.totals
+  document.getElementById('totals').innerHTML = [['people', t.local], ['remote', t.remote], ['shadow', t.shadow], ['opportunities', t.opportunities], ['decisions', t.decisions], ['nudges', t.nudges], ['queries', t.queries]].map(([k, v]) => `<div><b>${v}</b><span class="mute">${k}</span></div>`).join('')
+  document.getElementById('people').innerHTML = d.people.map(p => `<div class="p">
+    <div class="head"><b>${esc(p.name)}</b>
+      ${p.remote ? '<span class="tag dim">remote</span>' : p.shadow ? '<span class="tag dim">shadow</span>' : `<span class="tag ${p.onboarding === 'done' ? 'ok' : ''}">${esc(p.onboarding || '?')}${p.via ? ' via ' + esc(p.via) : ''}</span>`}
+      ${p.channels.map(c => `<span class="tag">${esc(c)}</span>`).join('')}
+      ${p.home ? '<span class="tag ok">home</span>' : '<span class="tag dim">no home</span>'}
+      <span class="mute" style="margin-left:auto;font-size:.8rem">joined ${ago(p.createdAt)}</span></div>
+    <div class="src">${p.sources.length ? p.sources.map(s => `<span class="tag ${s.error ? 'bad' : s.enabled ? 'ok' : 'dim'}" title="${esc(s.error || '')}">${esc(s.id)}${s.lastPoll ? ' · ' + ago(s.lastPoll) : ''}${s.error ? ' ⚠' : ''}</span>`).join('') : '<span class="mute">no connectors</span>'}</div>
+    <div class="row"><span><b>${p.friendsOut}</b> friends out · <b>${p.friendsIn}</b> in · <b>${p.wantMore}</b> wantMore · <b>${p.invitesOpen}</b> open invites</span>
+      <span><b>${p.observations.c}</b> observations, last ${ago(p.observations.last)}</span>
+      <span><b>${p.nudges.c}</b> nudges (${p.nudges.answered || 0} answered)</span>
+      <span><b>${p.decisions.c}</b> decisions (${p.decisions.quiet || 0} quiet, ${p.decisions.rated || 0} rated)</span></div>
+  </div>`).join('') || '<div class="mute">nobody yet</div>'
+  document.querySelector('#opps tbody').innerHTML = d.recentOpportunities.map(o => `<tr><td>${ago(o.created_at)}</td><td>${esc(o.kind)}<br><span class="mute">${esc(o.trigger_id)}</span></td><td>${esc(o.summary)}</td><td>${esc(o.status)}</td></tr>`).join('')
+})
+</script></body></html>

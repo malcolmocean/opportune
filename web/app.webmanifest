@@ -1,0 +1,15 @@
+{
+  "name": "opportune",
+  "short_name": "opportune",
+  "description": "Hanging out should be cheap. Your porchlight, your friends' porchlights, and the nudges in between.",
+  "start_url": "/app",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#090b22",
+  "theme_color": "#090b22",
+  "icons": [
+    { "src": "/web/icon.png", "sizes": "384x384", "type": "image/png", "purpose": "any" },
+    { "src": "/web/icon.png", "sizes": "384x384", "type": "image/png", "purpose": "maskable" }
+  ]
+}

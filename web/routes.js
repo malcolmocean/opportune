@@ -44,16 +44,18 @@ export async function mountWeb(app, ctx) {
   const page = name => (_req, res) => res.type('html').send(readFileSync(join(here, name), 'utf8'))
   app.get('/web/manage', page('manage.html'))
   app.get('/web/map', page('map.html'))
+  app.get('/app', page('app.html'))   // the user-facing app (web/app.js); see docs/APP-BRIDGE.md
 
-  const api = express.Router()
-  api.use(express.json({ limit: '256kb' }))
-  api.use((req, res, next) => {
+  const auth = (req, res, next) => {
     const token = req.get('x-manage-token') || req.query.token
     const me = personForToken(ctx, token)
     if (!me) return res.status(401).json({ error: 'bad or missing token' })
     req.me = me
     next()
-  })
+  }
+  const api = express.Router()
+  api.use(express.json({ limit: '256kb' }))
+  api.use(auth)
 
   const friendView = (me, f) => {
     const mine = { tier: f.tier, want_more: f.want_more, travel: f.travel, note: f.note, grants: f.grants || {}, via: f.via || {}, vouch: f.vouch }
@@ -212,13 +214,56 @@ export async function mountWeb(app, ctx) {
     res.json({ me: { id: me.id, displayName: me.display_name, location: loc(me) }, friends: friends.sort(byName), windowHours: LOCATION_WINDOW_MS / 3600e3 })
   })
 
-  api.use((err, _req, res, _next) => {
+  const onError = (err, _req, res, _next) => {
     if (err?.type === 'entity.parse.failed') return res.status(400).json({ error: 'bad json' })
     L.error(err)
     res.status(err.status || 500).json({ error: err.message || 'error' })
-  })
+  }
+  api.use(onError)
   app.use('/api/manage', api)
-  L.info('manage UI at /web/manage')
+
+  // ---- /api/app/*: what web/app.js needs beyond /api/app/state (server.js) and the ingest URL. Same token auth. ----
+  const appApi = express.Router()
+  appApi.use(express.json({ limit: '64kb' }))
+  appApi.use(auth)
+
+  // Everything the app needs to start a session: its ingest URL (the credential it POSTs status/home/nudge
+  // responses to), whether Telegram/push are bound, and a Telegram deep link if not. A person who arrived with
+  // a manage token (Telegram-first) gets an opportuneApp source connected here so the app has somewhere to post.
+  appApi.post('/session', (req, res) => {
+    const me = req.me
+    const mine = () => ctx.sources.forPerson(me.id)
+    let sc = mine().find(s => s.source_id === 'opportuneApp' && s.enabled)
+    if (!sc) { sc = ctx.sources.connect(me.id, 'opportuneApp', { device: req.body?.device || {} }); L.info(`${me.display_name} connected the app via /app`) }
+    const identities = ctx.people.identities(me.id)
+    const telegramLinked = identities.some(i => i.channel === 'telegram')
+    const loc = mine().find(s => s.source_id === 'locationPost' && s.enabled)
+    res.json({
+      me: { id: me.id, displayName: me.display_name, tz: me.tz, nodeUrl: me.node_url || ctx.people.nodeUrl, onboarding: me.onboarding?.step || null },
+      ingestUrl: ctx.sources.ingestUrl(sc),
+      manageUrl: manageUrl(ctx, me.id),
+      telegramLinked,
+      telegramLink: telegramLinked ? null : ctx.plugins.channels.telegram?.deepLink?.(ctx, `link-${sc.token}`) || null,
+      pushBound: identities.some(i => i.channel === 'fcm'),
+      locationPostUrl: loc ? ctx.sources.ingestUrl(loc) : null,
+      contactsSynced: ctx.db.get('select count(*) c from contacts where owner_id = ?', me.id)?.c ?? 0,
+    })
+  })
+
+  // "Heading over": ask the friend's agent the dropin question on my behalf and relay the structured answer.
+  // The dropin query itself enforces their askDropin grant, rate limits, and the veto nudge in the 'ask' state.
+  appApi.post('/friends/:id/dropin', async (req, res) => {
+    const me = req.me, f = ctx.people.get(req.params.id)
+    if (!f || isShadow(f) || !ctx.people.rel(f.id, me.id)) return res.status(404).json({ error: 'not a friend' })
+    const text = typeof req.body?.text === 'string' && req.body.text.trim() ? req.body.text.trim().slice(0, 200) : 'heading over now'
+    const ans = await ctx.query.ask({ from: me.id, to: f.id, kind: 'dropin', text })
+    L.info(`${me.display_name} → ${f.display_name} dropin: ${ans.answer}`)
+    res.json({ friend: { id: f.id, name: f.display_name }, answer: ans.answer, reason: ans.reason || null, text: ans.text || null, confidence: ans.confidence ?? null, revealed: ans.revealed || {} })
+  })
+
+  appApi.use(onError)
+  app.use('/api/app', appApi)
+  L.info('manage UI at /web/manage, app at /app')
 }
 
 const byName = (a, b) => (a.displayName || '').localeCompare(b.displayName || '')

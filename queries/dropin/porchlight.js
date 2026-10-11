@@ -12,11 +12,12 @@ export function homePlace(ctx, personId) {
 // else an open window from policy.dropinWindows for the local time in the person's tz,
 // else policy.dropinDefault. Returns { state, source, until?, note? }.
 // `note` is the status's own note when it has one, else the person's standing dropin_note (set once, survives
-// every status change; a status note replaces it for that status only). Absent when both are empty.
+// every status change; a status note replaces it for that status only). Absent when both are empty, and the standing
+// note never shows under a closed porchlight (it is an invitation; the status's own note still can: "back at 9").
 export function porchlight(ctx, person) {
   const row = ctx.observations.latest(person.id, 'status', { activeOnly: true })
   const defaultNote = person.dropin_note ?? ctx.people.get(person.id)?.dropin_note
-  const withNote = (r, own) => { const note = own || defaultNote; return note ? { ...r, note } : r }
+  const withNote = (r, own) => { const note = own || (r.state !== 'closed' ? defaultNote : null); return note ? { ...r, note } : r }
   if (['open', 'closed', 'ask'].includes(row?.data?.porchlight)) return withNote({ state: row.data.porchlight, source: 'status', until: row.until }, row.data.note)
   const pol = ctx.people.policy(person.id)
   const { day, hour } = localNow(person.tz)

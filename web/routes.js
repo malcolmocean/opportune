@@ -293,6 +293,21 @@ export async function mountWeb(app, ctx) {
     res.json({ name, wantMore, ...inv })
   })
 
+  // "That's wrong": the person disputes one fact of the belief card. Stored as a 'correction' observation.
+  appApi.post('/corrections', async (req, res) => {
+    const { belief, correct } = await import('../core/belief.js')
+    const b = req.body || {}
+    const keys = belief(ctx, req.me).facts.map(f => f.key)
+    if (!keys.includes(b.key)) return res.status(400).json({ error: `key must be one of ${keys.join(', ')}` })
+    if (b.actually != null && typeof b.actually !== 'string') return res.status(400).json({ error: 'actually must be text' })
+    const row = await correct(ctx, req.me, b)
+    L.info(`${req.me.display_name} corrected ${b.key}: "${b.believed}" → "${b.actually || '(no detail)'}"`)
+    res.json({ id: row.id, ...row.data, at: row.at })
+  })
+  appApi.get('/corrections', (req, res) => {
+    res.json(ctx.observations.recent(req.me.id, { kinds: ['correction'], limit: 20 }).map(r => ({ id: r.id, ...r.data, at: r.at })))
+  })
+
   appApi.use(onError)
   app.use('/api/app', appApi)
   L.info('app at /app')

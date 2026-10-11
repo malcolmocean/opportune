@@ -5,8 +5,8 @@ const L = log('cron')
 // Where a setting lives for this person: "with /home" if they have the Telegram bot, else the app's Settings + manage link.
 export async function settingsHint(ctx, personId, command) {
   if (ctx.people.identities(personId).some(i => i.channel === 'telegram')) return `with ${command}`
-  const { manageUrl } = await import('../web/routes.js')
-  return `in the app's Settings (${manageUrl(ctx, personId)})`
+  const { appUrl } = await import('../web/routes.js')
+  return `in the app's Settings (${appUrl(ctx, personId, 'settings')})`
 }
 
 // Deliberately boring: setInterval ticks. Jobs: poll sources, run cron triggers,

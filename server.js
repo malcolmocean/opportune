@@ -55,9 +55,9 @@ app.post('/app/register', async (req, res) => {
   ctx.people.update(p.id, { onboarding: { step: 'done', via: 'app', pendingInvite: inv ? inviteCode : null } })   // the app is their source; digests and suggestions are gated on 'done'
   if (inv) ctx.people.acceptInvite(inviteCode, p.id)
   const sc = ctx.sources.connect(p.id, 'opportuneApp', { device: device || {} })
-  const { manageUrl } = await import('./web/routes.js')
+  const { appUrl } = await import('./web/routes.js')
   const tg = ctx.plugins.channels.telegram?.deepLink?.(ctx, `link-${sc.token}`)
-  res.json({ personId: p.id, ingestUrl: ctx.sources.ingestUrl(sc), manageUrl: manageUrl(ctx, p.id), telegramLink: tg, inviter: inv ? ctx.people.get(inv.inviter_id)?.display_name : null })
+  res.json({ personId: p.id, ingestUrl: ctx.sources.ingestUrl(sc), manageUrl: appUrl(ctx, p.id), telegramLink: tg, inviter: inv ? ctx.people.get(inv.inviter_id)?.display_name : null })
 })
 
 // ---- app state for the web app: my porchlight (with remaining time) and my friends' porchlights, strong vs fading.
@@ -67,6 +67,7 @@ app.get('/api/app/state', async (req, res) => {
   const me = personForToken(ctx, req.query.token || req.get('x-manage-token') || '')
   if (!me) return res.status(401).json({ error: 'token required' })
   const { porchlight, presence } = await import('./queries/dropin/porchlight.js')
+  const { belief } = await import('./core/belief.js')
   const remaining = l => (l.until ? Math.max(0, Math.round((new Date(l.until) - Date.now()) / 60000)) : null)
   const strength = l => (l.state !== 'open' ? null : l.until == null ? 'steady' : remaining(l) > 45 ? 'strong' : remaining(l) > 10 ? 'fading' : 'last-call')
   const mine = porchlight(ctx, me), myPres = presence(ctx, me.id)
@@ -83,6 +84,7 @@ app.get('/api/app/state', async (req, res) => {
   }).filter(Boolean).sort((a, b) => (a.row.porchlight.state === 'open' ? 0 : 1) - (b.row.porchlight.state === 'open' ? 0 : 1) || (a.d ?? 1e9) - (b.d ?? 1e9)).map(x => x.row)
   res.json({ me: { id: me.id, name: me.display_name, hasHome: !!myPres.home, atHome: myPres.isHome, onboarding: me.onboarding?.step || null,
       story: me.story || '', defaultNote: me.dropin_note || '',   // ingest { story } / { defaultNote } to set; porchlight.note below is the resolved one (status note, else defaultNote)
+      belief: belief(ctx, me),   // { facts: [{ key, value, basis }], at }: what the node thinks is going on, for the home screen's "wrong" buttons
       porchlight: { state: mine.state, source: mine.source, until: mine.until || null, remainingMin: remaining(mine), strength: strength(mine), note: mine.note || null } },
     friends, nudges: ctx.nudges.recent(me.id, 20), now: new Date().toISOString() })
 })
@@ -92,11 +94,11 @@ app.post('/app/claim', async (req, res) => {
   const code = String(req.body?.code || '').trim().toUpperCase()
   const scId = code && ctx.db.kvGet(`applink:${code}`)
   const sc = scId && ctx.sources.get(scId.id || scId)
-  if (!sc || (scId.exp && scId.exp < Date.now())) return res.status(404).json({ error: 'code not found or expired; get a fresh one from /sources in Telegram' })
+  if (!sc || (scId.exp && scId.exp < Date.now())) return res.status(404).json({ error: 'code not found or expired; ask for a fresh sign-in link or code' })
   ctx.db.kvSet(`applink:${code}`, null)
   const p = ctx.people.get(sc.person_id)
-  const { manageUrl } = await import('./web/routes.js')
-  res.json({ personId: p.id, displayName: p.display_name, ingestUrl: ctx.sources.ingestUrl(sc), manageUrl: manageUrl(ctx, p.id), telegramLink: null, inviter: null })
+  const { appUrl } = await import('./web/routes.js')
+  res.json({ personId: p.id, displayName: p.display_name, ingestUrl: ctx.sources.ingestUrl(sc), manageUrl: appUrl(ctx, p.id), telegramLink: null, inviter: null })
 })
 
 // ---- email magic-link sign-in and address verification (channels/email): /app/email/request, /app/email/verify/:code, /api/app/email ----

@@ -44,7 +44,7 @@ create table if not exists observations (
   id text primary key,
   person_id text not null references people(id),
   source_id text not null,
-  kind text not null,               -- location|event|status|intent|motion|mention
+  kind text not null,               -- location|event|status|intent|motion|mention|correction
   at text not null,
   until text,
   data json not null,

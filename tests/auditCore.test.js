@@ -254,6 +254,6 @@ test('22. hints say /sources to Telegram people and the app Settings + manage UR
   const tg = ctx.db.get('select text from nudges where person_id = ?', jess.id).text
   assert.match(tg, /with \/sources\./); assert.ok(!tg.includes('Settings'))
   const app = ctx.db.get('select text from nudges where person_id = ?', eileen.id).text
-  assert.match(app, /in the app's Settings \(http:\/\/node\.test\/web\/manage\?token=/)
+  assert.match(app, /in the app's Settings \(http:\/\/node\.test\/app\?token=[^)]*#settings\)/)
   assert.ok(!app.includes('/sources'))
 })

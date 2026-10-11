@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { TIER_DEFAULTS } from '../core/people.js'
+import { isValidTz } from '../core/geo.js'
 
 // Web management surface: a magic-link page where a person manages friends, sources,
 // reviews the judge's calls, and sees a trusted-tier map. Telegram is bad at lists.
@@ -232,6 +233,8 @@ export async function mountWeb(app, ctx) {
   // a manage token (Telegram-first) gets an opportuneApp source connected here so the app has somewhere to post.
   appApi.post('/session', (req, res) => {
     const me = req.me
+    const tz = req.body?.tz
+    if (isValidTz(tz) && tz !== me.tz) { ctx.people.update(me.id, { tz }); me.tz = tz; L.info(`${me.display_name} is now in ${tz}`) }
     const mine = () => ctx.sources.forPerson(me.id)
     let sc = mine().find(s => s.source_id === 'opportuneApp' && s.enabled)
     if (!sc) { sc = ctx.sources.connect(me.id, 'opportuneApp', { device: req.body?.device || {} }); L.info(`${me.display_name} connected the app via /app`) }

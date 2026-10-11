@@ -89,6 +89,8 @@ main { flex: 1; width: 100%; max-width: 720px; margin: 0 auto; padding: 4px var(
 .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: var(--tap); padding: 10px 0; border-top: 1px solid var(--line) }
 .row:first-child, .card > h3 + .row { border-top: 0 }
 .row .lbl { flex: 1; min-width: 0 }
+.row .ico { flex: none; width: 22px; height: 22px; color: var(--muted) }
+.row .ico svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round }
 .row .lbl b { display: block; font-weight: 600 }
 .row .lbl span { display: block; font-size: 13px; color: var(--muted) }
 .row .lbl code { display: inline-block; margin-top: 4px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom }

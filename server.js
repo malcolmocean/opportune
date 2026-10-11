@@ -4,6 +4,7 @@ import { buildContext } from './core/context.js'
 import { mountAdmin, devOk } from './core/admin.js'
 import { startCron } from './core/cron.js'
 import { log } from './core/log.js'
+import { isValidTz } from './core/geo.js'
 
 const L = log('server')
 const ctx = await buildContext()
@@ -47,9 +48,9 @@ app.get('/ingest/:source/:token', (req, res) => res.json({ ok: true, source: req
 // ---- app-first start: the Android app registers itself, optionally with an invite code ----
 // Returns the ingest URL (which is the app's credential), a manage link, and a Telegram deep link that binds chat to the same person.
 app.post('/app/register', async (req, res) => {
-  const { inviteCode, displayName, device } = req.body || {}
+  const { inviteCode, displayName, device, tz } = req.body || {}
   const inv = inviteCode && ctx.people.peekInvite(inviteCode)
-  const p = ctx.people.create({ displayName: displayName || inv?.invitee_name || 'New person' })
+  const p = ctx.people.create({ displayName: displayName || inv?.invitee_name || 'New person', tz: isValidTz(tz) ? tz : undefined })
   ctx.people.update(p.id, { onboarding: { step: 'done', via: 'app', pendingInvite: inv ? inviteCode : null } })   // the app is their source; digests and suggestions are gated on 'done'
   if (inv) ctx.people.acceptInvite(inviteCode, p.id)
   const sc = ctx.sources.connect(p.id, 'opportuneApp', { device: device || {} })

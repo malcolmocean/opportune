@@ -12,6 +12,7 @@ export const bridge = {
   nodeUrl: () => call('getNodeUrl') || '',
   ingestUrl: () => call('getIngestUrl') || '',
   setIngestUrl: url => call('setIngestUrl', url),
+  signOut: () => call('signOut'),   // forget the ingest URL and stop posting location (no-op on older shells)
   permissions: () => (native ? json('getPermissions') : null),
   requestLocation: () => call('requestLocation'),
   requestNotifications: () => call('requestNotifications'),

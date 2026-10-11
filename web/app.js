@@ -24,6 +24,7 @@ const ls = {
   set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v) } catch {} },
 }
 const KEY = 'opportune.token'
+const deviceTz = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || null } catch { return null } }
 let toastT
 const toast = msg => { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => { t.hidden = true }, 2200) }
 const fail = e => toast(e?.message || 'something went wrong')
@@ -152,7 +153,7 @@ function renderOnboard(msg) {
 async function register({ inviteCode, displayName }) {
   if (!displayName) throw new Error('a name, so friends know who\'s there')
   if (inviteCode === '') inviteCode = undefined
-  const r = await req('/app/register', { method: 'POST', body: { inviteCode, displayName, device: bridge.deviceInfo() }, auth: false })
+  const r = await req('/app/register', { method: 'POST', body: { inviteCode, displayName, device: bridge.deviceInfo(), tz: deviceTz() }, auth: false })
   await finishOnboarding(r)
 }
 async function claim(code) {
@@ -221,11 +222,13 @@ function renderHome() {
     h('div', { class: 'hint' }, 'tap to change'))
   root.append(hero)
 
-  if (!me.hasHome) {
-    root.append(h('div', { class: 'card' }, h('h3', {}, 'No home set yet'),
-      h('p', { class: 'muted' }, 'Your porchlight needs a place to shine from. Friends only ever see "home" or "out", never where that is.'),
-      h('button', { class: 'btn volt', onclick: setHome }, 'Set home here')))
-  } else if (!me.atHome && pl.state === 'open') {
+  if (isNative && !perms?.notifications) {
+    root.append(h('div', { class: 'card' }, h('h3', {}, 'Let nudges reach you'),
+      h('p', { class: 'muted' }, 'A nudge is a notification with yes and veto buttons. Without it the app can only tell you when you open it.'),
+      h('button', { class: 'btn volt', onclick: () => { bridge.requestNotifications(); toast(perms?.notifications === false ? 'turn notifications on in the settings page' : 'answer the Android prompt') } }, perms?.notifications === false ? 'Open notification settings' : 'Allow notifications')))
+  }
+  if (!me.hasHome) root.append(homeCard())
+  else if (!me.atHome && pl.state === 'open') {
     root.append(h('p', { class: 'small muted', style: 'margin:-4px 0 12px 4px' }, 'You\'re out right now, so drop-ins read "unlikely" until you\'re back.'))
   }
 
@@ -276,7 +279,7 @@ function openPorchSheet() {
   }
   openSheet(h('h3', {}, 'Your porchlight'), h('p', { class: 'small muted', style: 'margin:0' }, 'Open means friends nearby can just come by. Ask means you get a yes-or-veto nudge first.'),
     h('div', { class: 'lbl' }, 'Open for'),
-    h('div', { class: 'chips' }, chip('1h', '', () => ({ porchlight: 'open', hours: 1 })), chip('2h', '', () => ({ porchlight: 'open', hours: 2 }), pl.state === 'open'), chip('4h', '', () => ({ porchlight: 'open', hours: 4 })), chip('tonight', '', tonight)),
+    h('div', { class: 'chips' }, chip('1h', '', () => ({ porchlight: 'open', hours: 1 })), chip('2h', '', () => ({ porchlight: 'open', hours: 2 })), chip('4h', '', () => ({ porchlight: 'open', hours: 4 })), chip('tonight', '', tonight)),
     h('div', { class: 'lbl' }, 'Or'),
     h('div', { class: 'chips' }, chip('Ask me', 'volt', () => ({ porchlight: 'ask' }), pl.state === 'ask'), chip('Closed', 'dark', () => ({ porchlight: 'closed' }), pl.state === 'closed')),
     h('div', { class: 'lbl' }, 'Note'), note,
@@ -295,13 +298,36 @@ async function setPorch(status, note) {
     if (mins && state.me.porchlight.until) ls.set('opportune.porch.total', JSON.stringify({ min: mins, until: state.me.porchlight.until }))
   } catch (e) { fail(e) }
 }
-async function setHome() {
-  try {
-    toast('getting a fix…')
-    const loc = await currentLocation()
-    await ingest({ home: { lat: loc.lat, lng: loc.lng } })
-    toast('home set'); await refresh()
-  } catch (e) { fail(e) }
+// "Set home to 123 Main St": find the phone first, name the place, then one tap confirms. If location isn't
+// allowed yet the button asks for it first. Friends never see the address; it's only to confirm the fix is right.
+function homeCard() {
+  const btn = h('button', { class: 'btn volt' }, 'Finding where you are…')
+  const sub = h('p', { class: 'muted' }, 'Your porchlight shines from home. Friends only ever see "home" or "out", never where that is.')
+  let fix = null
+  const arm = () => { btn.disabled = false; btn.onclick = async () => { btn.disabled = true; try { await ingest({ home: { lat: fix.lat, lng: fix.lng } }); toast('home set'); await refresh() } catch (e) { fail(e); btn.disabled = false } } }
+  const locate = async () => {
+    btn.disabled = true; btn.textContent = 'Finding where you are…'
+    try {
+      fix = await currentLocation()
+      btn.textContent = 'Set home here'; arm()
+      const addr = await reverseGeocode(fix).catch(() => null)
+      if (addr) btn.textContent = `Set home to ${addr}`
+    } catch (e) {
+      btn.textContent = 'Use my location'; btn.disabled = false; btn.onclick = () => { locate() }
+      if (e?.code !== 1) fail(e)   // 1 = permission denied; the button already says what to do
+    }
+  }
+  if (perms?.location) locate()
+  else { btn.textContent = 'Use my location'; btn.disabled = false; btn.onclick = () => { locate() } }
+  return h('div', { class: 'card' }, h('h3', {}, 'Where\'s home?'), sub, btn)
+}
+async function reverseGeocode({ lat, lng }) {
+  const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&lat=${lat}&lon=${lng}`, { headers: { accept: 'application/json' } })
+  if (!r.ok) throw new Error('no address')
+  const a = (await r.json()).address || {}
+  const street = [a.house_number, a.road || a.pedestrian || a.footway].filter(Boolean).join(' ')
+  const town = a.city || a.town || a.village || a.suburb || a.neighbourhood
+  return [street, town].filter(Boolean).join(', ') || null
 }
 
 // ======================================================================
@@ -368,7 +394,7 @@ function renderEmbed(tab) {
     frame = h('iframe', { class: 'embed', title: 'manage', src: `/web/manage?token=${encodeURIComponent(token)}#${tab}`, onload: styleFrame })
     root.replaceChildren(h('div', { class: 'screen-head' }, h('h2', { id: 'embedTitle' }, tab), tab === 'review' && h('button', { class: 'link small', onclick: () => show('nudges') }, '← nudges')), frame)
   } else {
-    const head = root.querySelector('.screen-head'); head.replaceChildren(h('h2', {}, tab), tab === 'review' && h('button', { class: 'link small', onclick: () => show('nudges') }, '← nudges'))
+    const head = root.querySelector('.screen-head'); head.replaceChildren(h('h2', {}, tab), ...(tab === 'review' ? [h('button', { class: 'link small', onclick: () => show('nudges') }, '← nudges')] : []))
     try { frame.contentWindow.location.hash = `#${tab}` } catch {}
   }
 }
@@ -403,12 +429,13 @@ async function renderSettings() {
   if (!isNative) perms = await browserPermissions()
   else perms = bridge.permissions() || perms
   const me = session.me
-  const row = (title, sub, right) => h('div', { class: 'row' }, h('div', { class: 'lbl' }, h('b', {}, title), sub && h('span', {}, sub)), right)
+  const row = (title, sub, right, icon) => h('div', { class: 'row' }, icon && ico(icon), h('div', { class: 'lbl' }, h('b', {}, title), sub && h('span', {}, sub)), right)
   const status = (ok, onLabel = 'allowed', offLabel = 'not yet') => h('span', { class: 'small muted' }, h('i', { class: `dot ${ok ? 'on' : ok === false ? 'off' : ''}` }), ok ? onLabel : ok === false ? offLabel : 'unknown')
 
   // me
   root.append(h('h2', {}, 'You'), h('div', { class: 'card' },
-    row(me.displayName || '(unnamed)', me.tz),
+    row(me.displayName || '(unnamed)', null),
+    row('Timezone', 'from this device; quiet hours and digests follow it', h('span', { class: 'small muted' }, me.tz)),
     row('Node', null, h('code', {}, new URL(me.nodeUrl || location.origin).host)),
     row('Telegram', session.telegramLinked ? 'linked: nudges and chat reach you there' : 'optional: chat with your agent ("who\'s around tonight?")',
       session.telegramLinked ? status(true, 'linked') : (session.telegramLink || ls.get('opportune.telegramLink'))
@@ -423,20 +450,20 @@ async function renderSettings() {
     // notifications === false also covers "turned off in system settings"; requestNotifications() then opens that page
     const notif = p.notifications ? status(true) : h('span', { style: 'display:flex;align-items:center;gap:8px' }, h('span', { class: 'small muted' }, h('i', { class: 'dot off' }), 'off'), ask(p.notifications === false ? 'Open settings' : 'Allow', bridge.requestNotifications))
     permCard.append(
-      row('Notifications', 'nudges as heads-up notifications with yes/veto', notif),
-      row('Location', 'so it notices you\'re near a friend', p.location ? status(true) : ask('Allow', bridge.requestLocation)),
-      row('Background location', '"all the time": the whole point, while the phone\'s in your pocket', p.backgroundLocation ? status(true) : ask('Allow', bridge.requestLocation)),
-      row('Physical activity', 'walking vs driving, so a drive-by isn\'t a drop-in', p.activity ? status(true) : ask('Allow', bridge.requestLocation)),
+      row('Notifications', 'nudges as heads-up notifications with yes/veto', notif, 'bell'),
+      row('Location', 'so it notices you\'re near a friend', p.location ? status(true) : ask('Allow', bridge.requestLocation), 'pin'),
+      row('Background location', '"all the time": the whole point, while the phone\'s in your pocket', p.backgroundLocation ? status(true) : ask('Allow', bridge.requestLocation), 'pocket'),
+      row('Physical activity', 'walking vs driving, so a drive-by isn\'t a drop-in', p.activity ? status(true) : ask('Allow', bridge.requestLocation), 'walk'),
       row('Share contacts', `names on guest lists get recognised. ${session.contactsSynced ? `${session.contactsSynced} synced.` : 'Synced daily, stays on your node.'}`,
         h('button', { class: 'toggle', role: 'switch', 'aria-checked': String(!!p.contacts), 'aria-label': 'share contacts', onclick: () => {
           if (p.contacts) { bridge.stopContacts(); toast('contacts sharing off'); perms = { ...p, contacts: false }; renderSettings() }
           else { bridge.requestContacts(); toast('answer the Android prompt') }
-        } })),
-      row('Push', null, status(session.pushBound, 'registered', 'waiting for the app to register')))
+        } }), 'people'),
+      row('Push', null, status(session.pushBound, 'registered', 'waiting for the app to register'), 'push'))
   } else {
     permCard.append(
-      row('Location (this browser)', 'one-off fixes for "set home" and "heading over"', perms?.location ? status(true) : h('button', { class: 'btn small ghost', onclick: async () => { try { await currentLocation(); renderSettings() } catch (e) { fail(e) } } }, 'Allow')),
-      row('Background location', 'browsers can\'t. Two ways to get it:', null),
+      row('Location (this browser)', 'one-off fixes for "set home" and "heading over"', perms?.location ? status(true) : h('button', { class: 'btn small ghost', onclick: async () => { try { await currentLocation(); renderSettings() } catch (e) { fail(e) } } }, 'Allow'), 'pin'),
+      row('Background location', 'browsers can\'t. Two ways to get it:', null, 'pocket'),
       h('p', { class: 'small', style: 'margin:0 0 10px' }, h('a', { href: 'https://github.com/malcolmocean/opportune/tree/main/apps/android', target: '_blank', rel: 'noopener' }, 'Install the Android app'), ' and sign in with the same invite or the Telegram code; it keeps your porchlight honest and shows nudges with yes/veto buttons.'),
       h('p', { class: 'small', style: 'margin:0' }, 'On iPhone, ', h('a', { href: 'https://overland.p3k.app/', target: '_blank', rel: 'noopener' }, 'Overland'), ' (or OwnTracks in HTTP mode) can post to this URL:'))
     const urlBox = h('div')
@@ -463,8 +490,18 @@ async function renderSettings() {
 
   // sign out
   root.append(h('div', { class: 'card', style: 'margin-top:20px' },
-    row('Sign out', isNative ? 'forgets the token here; the app keeps posting location until you clear its data or sign in again' : 'forgets the token in this browser', h('button', { class: 'btn small ghost', onclick: signOut }, 'Sign out'))))
+    row('Sign out', isNative ? 'forgets this sign-in and stops sharing location from this phone' : 'forgets the token in this browser', h('button', { class: 'btn small ghost', onclick: signOut }, 'Sign out'))))
 }
+// Small line icons for settings rows, same stroke style as the tab bar.
+const ICONS = {
+  bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+  pin: '<path d="M12 21s-6-5.5-6-11a6 6 0 0 1 12 0c0 5.5-6 11-6 11z"/><circle cx="12" cy="10" r="2.2"/>',
+  pocket: '<rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M10 18h4"/><path d="M12 7.5s-2 2-2 3.6a2 2 0 0 0 4 0c0-1.6-2-3.6-2-3.6z"/>',
+  walk: '<circle cx="13" cy="4.5" r="1.8"/><path d="M10 21l2-6-2-2 1-5 3 1 2 3"/><path d="M11 8l-3 3 1 3"/><path d="M14 13l2 2 1 6"/>',
+  people: '<circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><circle cx="17" cy="9" r="2.2"/><path d="M15.5 19a4.5 4.5 0 0 1 5.5-4"/>',
+  push: '<path d="M4 12a8 8 0 0 1 16 0"/><path d="M7 12a5 5 0 0 1 10 0"/><circle cx="12" cy="12" r="1.5"/><path d="M12 13.5V21"/>',
+}
+const ico = name => h('span', { class: 'ico', 'aria-hidden': 'true', html: `<svg viewBox="0 0 24 24">${ICONS[name] || ''}</svg>` })
 function copyRow(text) {
   return h('div', { class: 'copy' }, h('code', {}, text), h('button', { class: 'btn small ghost', onclick: async () => { try { await navigator.clipboard.writeText(text); toast('copied') } catch { toast('long-press to copy') } } }, 'Copy'))
 }
@@ -475,6 +512,7 @@ function signOut(msg) {
   token = null; session = null; state = null; extraNudges = []
   clearInterval(refreshT)
   if (frame) { frame.remove(); frame = null }
+  if (isNative) bridge.signOut()   // clears the ingest URL and stops the location service
   history.replaceState(null, '', location.pathname)
   renderOnboard(msg)
 }
@@ -496,7 +534,7 @@ async function refresh() {
   }
 }
 async function start() {
-  session = await req('/api/app/session', { method: 'POST', body: { device: bridge.deviceInfo() } })
+  session = await req('/api/app/session', { method: 'POST', body: { device: bridge.deviceInfo(), tz: deviceTz() } })
   if (isNative && !bridge.ingestUrl()) bridge.setIngestUrl(session.ingestUrl)
   perms = isNative ? bridge.permissions() : await browserPermissions()
   await refresh()

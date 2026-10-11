@@ -162,8 +162,7 @@ export const signInMail = (ctx, { to, name, url, code }) => ({
   ].join('\n'),
   html: mailHtml({
     eyebrow: 'opportune', title: name ? `Come on in, ${esc(name)}.` : 'Come on in.',
-    lead: 'One tap and you\'re signed in on this device. No password, now or ever.',
-    cta: 'Open opportune', url, code, codeHint: 'Or open the app and type this code',
+    lead: '', cta: 'Open opportune', url, code, codeHint: 'Or open the app and type this code',
     foot: 'The link and the code work once and go dark in 15 minutes. If you didn\'t ask for this, nothing happens; just ignore it.',
   }),
 })
@@ -195,9 +194,9 @@ export function mailHtml({ eyebrow, title, lead, cta, url, code, codeHint, foot 
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${pale};">
 <tr><td align="center" style="padding:32px 16px;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#ffffff;border:1px solid ${line};border-radius:16px;">
-<tr><td style="padding:28px 28px 8px;${font};font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:${ember};font-weight:600;">&#128294; ${esc(eyebrow)}</td></tr>
+<tr><td style="padding:28px 28px 8px;${font};font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:${ember};font-weight:600;">&#128075; ${esc(eyebrow)}</td></tr>
 <tr><td style="padding:0 28px;${font};font-size:28px;line-height:1.15;font-weight:800;color:${navy};letter-spacing:-.01em;">${title}</td></tr>
-<tr><td style="padding:12px 28px 0;${font};font-size:16px;line-height:1.55;color:${navy};">${lead}</td></tr>
+${lead ? `<tr><td style="padding:12px 28px 0;${font};font-size:16px;line-height:1.55;color:${navy};">${lead}</td></tr>` : ''}
 <tr><td style="padding:24px 28px 0;">
   <table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="background:${ember};border-radius:12px;">
     <a href="${esc(url)}" style="display:inline-block;padding:14px 26px;${font};font-size:16px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:12px;">${esc(cta)} &rarr;</a>

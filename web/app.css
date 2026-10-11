@@ -1,7 +1,7 @@
 /* opportune app. Brand tokens from site/index.html; dark by default, light when the system asks. */
 :root {
   --night: #090b22; --night-2: #11143a; --glass: rgba(255,255,255,.055); --line: rgba(190,196,255,.16);
-  --ink: #eeedf8; --mute: #a4a8cf; --ember: #ff6b3d; --magenta: #d63fc6; --volt: #4a74ff; --mint: #4ad99a;
+  --ink: #eeedf8; --mute: #a4a8cf; --ember: #ff6b3d; --flame: #ffbe45; --flame-soft: rgba(255,190,69,.12); --magenta: #d63fc6; --volt: #4a74ff; --mint: #4ad99a;
   --spectrum: linear-gradient(90deg, var(--ember), var(--magenta) 50%, var(--volt));
   --display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
   --body: "Figtree", "Helvetica Neue", system-ui, sans-serif;
@@ -113,7 +113,7 @@ main { flex: 1; width: 100%; max-width: 720px; margin: 0 auto; padding: 4px var(
 .link { background: none; border: 0; padding: 0; color: var(--volt); font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer }
 .chips { display: flex; gap: 8px; flex-wrap: wrap }
 .chip { min-height: 44px; padding: 8px 16px; border-radius: 999px; border: 1px solid var(--line); background: var(--glass); color: var(--fg); font-weight: 600 }
-.chip.on { border-color: var(--ember); color: var(--ember); background: rgba(255,107,61,.1) }
+.chip.on { border-color: var(--flame); color: var(--flame); background: var(--flame-soft) }
 .chip.volt.on { border-color: var(--volt); color: var(--volt); background: rgba(74,116,255,.12) }
 .chip.dark.on { border-color: var(--muted); color: var(--fg); background: var(--glass) }
 .seg { display: flex; background: var(--glass); border: 1px solid var(--line); border-radius: 12px; padding: 3px; gap: 2px }
@@ -141,7 +141,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8 }
 .lantern .halo { opacity: 0; transition: opacity .6s; transform-box: fill-box; transform-origin: center }
 .lantern[data-state="open"] { filter: drop-shadow(0 0 12px rgba(255,107,61,.55)) }
 .lantern[data-state="open"] .glass { fill: rgba(255,150,70,.34) }
-.lantern[data-state="open"] .flame { opacity: 1; fill: var(--ember); animation: flame 2.8s ease-in-out infinite }
+.lantern[data-state="open"] .flame { opacity: 1; fill: var(--flame); animation: flame 2.8s ease-in-out infinite }
 .lantern[data-state="open"] .core { opacity: 1; fill: #ffecc2 }
 .lantern[data-state="open"] .halo { opacity: 1; animation: halo 3.4s ease-in-out infinite }
 .lantern[data-state="ask"] .glass { fill: rgba(74,116,255,.14) }
@@ -199,7 +199,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8 }
 .friend .name { font: 600 18px var(--display); display: flex; align-items: center; gap: 6px; min-width: 0 }
 .friend .name .star { color: #f0b429; font-size: 14px }
 .friend .state { font-size: 14px; font-weight: 600; margin-top: 1px }
-.friend[data-state="open"] .state { color: var(--ember) }
+.friend[data-state="open"] .state { color: var(--flame) }
 .friend .where { color: var(--muted); font-size: 13px; margin-top: 1px }
 .friend .note { font-style: italic; font-size: 14px; margin-top: 3px }
 .friend .story { font-size: 13px; color: var(--muted); margin-top: 3px; white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden }

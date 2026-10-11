@@ -200,8 +200,8 @@ async function finishOnboarding(bundle) {
   token = bundle.ingestUrl.split('/').pop()
   ls.set(KEY, token); ls.set('opportune.signedOut', null)
   ls.set('opportune.telegramLink', bundle.telegramLink || null)
-  ls.set('opportune.hello', bundle.inviter ? `${bundle.inviter} wants to see more of you. Flip your porchlight on when you're around.`
-    : bundle.displayName ? `Signed in as ${bundle.displayName}.` : 'You\'re in. Set your porchlight, then invite someone from People.')
+  ls.set('opportune.hello', bundle.inviter ? `${bundle.wantMore === false ? `You and ${bundle.inviter} are connected.` : `${bundle.inviter} wants to see more of you.`} Flip your porchlight on when you're around.`
+    : bundle.displayName ? null : 'You\'re in. Set your porchlight, then invite someone from People.')   // a returning sign-in needs no banner; the name is in the header
   bridge.setIngestUrl(bundle.ingestUrl)   // the shell starts its services; location only if already granted, so we ask next
   const u = new URL(location.href); for (const k of ['invite', 'token', 'claim']) u.searchParams.delete(k); history.replaceState(null, '', u.pathname + u.search + '#home')
   await start()
@@ -214,7 +214,8 @@ function renderPerms() {
   const lamp = h('div', { class: 'lamp' }, lanternEl('open', { size: 110 }))
   root.append(h('div', { class: 'card perm' }, lamp,
     h('h1', {}, 'Let it see where you are'),
-    h('p', {}, 'Location is how opportune notices you\'re a block from a friend whose porchlight is on. It stays on your node; friends see "home" or "a block away", never a pin.'),
+    h('p', {}, 'Location is for the bumping-into part: noticing when you and a friend are near each other, or when you pass someone who\'s up for company. It stays on your node. Friends see "home" or "a block away", never a pin.'),
+    h('p', { class: 'small muted' }, 'Your porchlight is a separate thing. It says whether you\'re open to drop-ins right now, and only you flip it.'),
     h('button', { class: 'btn', onclick: () => { bridge.requestLocation(); toast('answer the system prompt') } }, 'Allow location'),
     h('button', { class: 'btn ghost', onclick: () => show('home') }, 'Not now')))
   $('#tabbar').hidden = true

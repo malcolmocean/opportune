@@ -160,7 +160,12 @@ function renderOnboard(msg) {
       const v = email.value.trim()
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) throw new Error('that doesn\'t look like an email address')
       try { await req('/app/email/request', { method: 'POST', body: { email: v }, auth: false }) } catch (ex) { throw ex.status === 404 ? new Error('email sign-in isn\'t set up on this node yet') : ex }
-      form.replaceChildren(h('p', { style: 'margin:0' }, h('b', {}, 'Check your mail.'), ` A sign-in link is on its way to ${v}. Open it on this device.`))
+      // Sent. Tapping the link lands back here; the 6-letter code from the same mail is the way in when it doesn't.
+      const ce = err(), code = h('input', { type: 'text', class: 'code', name: 'code', placeholder: '6 letters from the email', autocomplete: 'one-time-code', autocapitalize: 'characters', spellcheck: 'false', maxlength: 6 })
+      const codeForm = h('form', {}, h('p', { style: 'margin:0' }, h('b', {}, 'Check your mail.'), ` A sign-in link is on its way to ${v}. Tap it on this device, or type the code it shows:`), code, ce, h('button', { type: 'submit', class: 'btn block' }, 'Sign in'))
+      codeForm.addEventListener('submit', submit(codeForm, ce, () => claim(code.value.trim(), { typed: true })))
+      form.replaceWith(codeForm)
+      code.focus()
     }))
     way('email', 'Sign in with email', 'A link in your inbox, no password.', form) }
   // 4. telegram claim

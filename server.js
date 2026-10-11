@@ -17,6 +17,14 @@ app.use('/', express.static('site', { index: 'index.html' }))   // landing page,
 
 // ---- federation surface ----
 app.get('/.well-known/opportune', (_req, res) => res.json(ctx.federation.wellKnown()))
+// Android App Links: with the signing cert fingerprint(s) here, Android opens https://<this host>/app... links
+// (sign-in and email-verify mails) in the shell instead of the browser. ANDROID_CERT_SHA256 is comma-separated
+// (debug cert now, release cert later, both while they overlap); unset → 404 and links open in the browser.
+app.get('/.well-known/assetlinks.json', (_req, res) => {
+  const prints = String(process.env.ANDROID_CERT_SHA256 || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean)
+  if (!prints.length) return res.status(404).json({ error: 'no ANDROID_CERT_SHA256 configured' })
+  res.json([{ relation: ['delegate_permission/common.handle_all_urls'], target: { namespace: 'android_app', package_name: process.env.ANDROID_APP_ID || 'club.opportune.app', sha256_cert_fingerprints: prints } }])
+})
 app.post('/friend/accept', (req, res) => { const r = ctx.federation.acceptIncoming(req.body); res.status(r.error ? 400 : 200).json(r) })   // signed by a not-yet-known key, so verified by invite code instead
 app.post('/q', (req, res, next) => ctx.federation.verify(req, res, next), async (req, res) => {
   const { to, kind, text, window, context } = req.body

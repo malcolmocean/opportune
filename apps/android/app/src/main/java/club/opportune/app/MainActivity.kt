@@ -162,13 +162,31 @@ class MainActivity : AppCompatActivity() {
             LocationService.start(this)
             registerFcmToken()
         }
-        loadApp(openNudges = wantsNudges(intent))
+        val link = appLink(intent)
+        if (link != null) loadLink(link) else loadApp(openNudges = wantsNudges(intent))
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        appLink(intent)?.let { loadLink(it); return }
         if (wantsNudges(intent)) showNudges()
+    }
+
+    /** An https://<node>/app… link (sign-in mail, email verify) delivered by App Links. Null for anything else. */
+    private fun appLink(i: Intent?): String? {
+        val u = i?.data ?: return null
+        if (i.action != Intent.ACTION_VIEW || u.scheme != "https" || u.path?.startsWith("/app") != true) return null
+        return u.toString()
+    }
+
+    /** Load a link in the WebView so its ?claim=CODE lands in the shell. The link's origin becomes the node. */
+    private fun loadLink(url: String) {
+        val origin = Uri.parse(url).let { "${it.scheme}://${it.authority}" }
+        if (origin != Prefs.nodeUrl(this)) Prefs.setNodeUrl(this, origin)
+        hideFallback()
+        pageReady = false
+        webView.loadUrl(url)
     }
 
     override fun onResume() {

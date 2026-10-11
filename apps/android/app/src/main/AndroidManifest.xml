@@ -40,6 +40,14 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Sign-in and email-verify links open here, not in the browser. Verified against
+                 https://opportune.club/.well-known/assetlinks.json (the node serves it from ANDROID_CERT_SHA256). -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="opportune.club" android:pathPrefix="/app" />
+            </intent-filter>
         </activity>
 
         <service

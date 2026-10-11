@@ -64,7 +64,7 @@ export function mountEmail(app, ctx) {
     if (!person || person.remote) { L.debug(`sign-in requested for unknown address ${email}`); return res.json({ ok: true }) }
     try {
       const code = issueSignIn(ctx, person)
-      await sendEmail(ctx, signInMail(ctx, { to: email, url: `${appUrl(ctx)}?claim=${code}` }))
+      await sendEmail(ctx, signInMail(ctx, { to: email, name: person.display_name, url: `${appUrl(ctx)}?claim=${code}`, code }))
       L.info(`sign-in link sent to ${person.display_name}`)
     } catch (e) { L.error(`sign-in mail to ${email} failed:`, e.message) }   // still 200: the person is told to check their inbox either way
     res.json({ ok: true })
@@ -86,7 +86,7 @@ export function mountEmail(app, ctx) {
     if (!limiter.allow(`addr:${email}`, ...LIMITS.address) || !limiter.allow(`person:${me.id}`, ...LIMITS.address)) return res.status(429).json({ error: 'too many verification emails; try again in a few minutes' })
     try {
       const code = issueVerify(ctx, me, email)
-      await sendEmail(ctx, verifyMail(ctx, { to: email, name: me.display_name, url: `${ctx.people.nodeUrl}/app/email/verify/${code}` }))
+      await sendEmail(ctx, verifyMail(ctx, { to: email, name: me.display_name, url: `${ctx.people.nodeUrl}/app/email/verify/${code}`, code }))
       L.info(`verification link sent for ${me.display_name}`)
       res.json({ ok: true })
     } catch (e) { L.error(`verification mail to ${email} failed:`, e.message); res.status(502).json({ error: 'could not send the email; try again' }) }
@@ -148,17 +148,69 @@ export async function sendEmail(ctx, { to, subject, text, html }) {
   return r.json().catch(() => ({}))
 }
 
-export const signInMail = (ctx, { to, url }) => ({
+// ---- the two sign-in mails ----
+// One shared layout: a short greeting, one big button, and the 6-letter code spelled out for anyone whose
+// mail client opens links in the wrong place (the Android shell claims typed codes too). Table layout and
+// inline styles because that is what mail clients honour; no images, no web fonts, nothing to load.
+export const signInMail = (ctx, { to, name, url, code }) => ({
   to, subject: 'Sign in to opportune',
-  text: `Here's your sign-in link for opportune:\n\n${url}\n\nIt works once and expires in 15 minutes. If you didn't ask for this, ignore this email.\n`,
-  html: `<p>Here's your sign-in link for opportune:</p><p><a href="${url}">${url}</a></p><p>It works once and expires in 15 minutes. If you didn't ask for this, ignore this email.</p>`,
+  text: [
+    `${name ? `Hi ${name}. ` : ''}Here's your way back in:`, '', url, '',
+    `Or open the app and type this code: ${code}`, '',
+    'The link and the code work once and go dark in 15 minutes.',
+    'If you didn\'t ask for this, nothing happens. Just ignore it.', '',
+  ].join('\n'),
+  html: mailHtml({
+    eyebrow: 'opportune', title: name ? `Come on in, ${esc(name)}.` : 'Come on in.',
+    lead: 'One tap and you\'re signed in on this device. No password, now or ever.',
+    cta: 'Open opportune', url, code, codeHint: 'Or open the app and type this code',
+    foot: 'The link and the code work once and go dark in 15 minutes. If you didn\'t ask for this, nothing happens; just ignore it.',
+  }),
 })
 
-export const verifyMail = (ctx, { to, name, url }) => ({
+export const verifyMail = (ctx, { to, name, url, code }) => ({
   to, subject: 'Confirm your email for opportune',
-  text: `Confirm that this address belongs to ${name || 'you'} on opportune:\n\n${url}\n\nThe link works once and expires in 15 minutes. If you didn't ask for this, ignore this email.\n`,
-  html: `<p>Confirm that this address belongs to ${esc(name || 'you')} on opportune:</p><p><a href="${url}">${url}</a></p><p>The link works once and expires in 15 minutes. If you didn't ask for this, ignore this email.</p>`,
+  text: [
+    `Is this you${name ? `, ${name}` : ''}? Confirm that ${to} is your address on opportune:`, '', url, '',
+    `Or open the app and type this code: ${code}`, '',
+    'Friends never see your email. It is only how you get back in.',
+    'The link and the code work once and go dark in 15 minutes. If you didn\'t ask for this, just ignore it.', '',
+  ].join('\n'),
+  html: mailHtml({
+    eyebrow: 'opportune', title: name ? `Is this you, ${esc(name)}?` : 'Is this you?',
+    lead: `Tap to confirm that <b>${esc(to)}</b> is yours on opportune. Friends never see it; it's only how you get back in.`,
+    cta: 'Yes, that\'s me', url, code, codeHint: 'Or open the app and type this code',
+    foot: 'The link and the code work once and go dark in 15 minutes. If you didn\'t ask for this, nothing happens; just ignore it.',
+  }),
 })
+
+// Night-navy card on a pale page, one ember button, the code in spaced mono. Lead is already-escaped HTML.
+export function mailHtml({ eyebrow, title, lead, cta, url, code, codeHint, foot }) {
+  const navy = '#15173a', ember = '#e85a2c', pale = '#f6f5ff', muted = '#5a5e8a', line = '#e1e0f2'
+  const font = "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif"
+  const mono = "font-family:'SF Mono',Menlo,Consolas,'Liberation Mono',monospace"
+  const spaced = esc(String(code || '')).split('').join(' ')
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="color-scheme" content="light"><title>${esc(title)}</title></head>
+<body style="margin:0;padding:0;background:${pale};">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${pale};">
+<tr><td align="center" style="padding:32px 16px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#ffffff;border:1px solid ${line};border-radius:16px;">
+<tr><td style="padding:28px 28px 8px;${font};font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:${ember};font-weight:600;">&#128294; ${esc(eyebrow)}</td></tr>
+<tr><td style="padding:0 28px;${font};font-size:28px;line-height:1.15;font-weight:800;color:${navy};letter-spacing:-.01em;">${title}</td></tr>
+<tr><td style="padding:12px 28px 0;${font};font-size:16px;line-height:1.55;color:${navy};">${lead}</td></tr>
+<tr><td style="padding:24px 28px 0;">
+  <table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="background:${ember};border-radius:12px;">
+    <a href="${esc(url)}" style="display:inline-block;padding:14px 26px;${font};font-size:16px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:12px;">${esc(cta)} &rarr;</a>
+  </td></tr></table>
+</td></tr>
+${code ? `<tr><td style="padding:28px 28px 0;${font};font-size:13px;color:${muted};">${esc(codeHint)}</td></tr>
+<tr><td style="padding:8px 28px 0;"><div style="display:inline-block;padding:12px 18px;background:${pale};border:1px solid ${line};border-radius:10px;${mono};font-size:26px;letter-spacing:.18em;font-weight:600;color:${navy};">${spaced}</div></td></tr>` : ''}
+<tr><td style="padding:28px 28px 28px;${font};font-size:13px;line-height:1.5;color:${muted};">${esc(foot)}</td></tr>
+</table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;"><tr><td style="padding:16px 8px 0;${font};font-size:12px;line-height:1.5;color:${muted};">If the button doesn't work, paste this into your browser:<br><a href="${esc(url)}" style="color:${muted};word-break:break-all;">${esc(url)}</a></td></tr></table>
+</td></tr></table>
+</body></html>`
+}
 
 const subjectFor = text => { const s = String(text || '').replace(/\s+/g, ' ').trim(); return s.length > 70 ? `${s.slice(0, 67)}...` : s || 'A nudge from opportune' }
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))

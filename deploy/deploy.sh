@@ -4,10 +4,14 @@
 set -eu
 IP=${1:?ip}; HOST=${2:-$IP.sslip.io}; case "$HOST" in *sslip.io*) ;; *) HOST="$HOST, $IP.sslip.io";; esac
 cd "$(dirname "$0")/.."
+# Deploy what is COMMITTED (git HEAD), never the working tree: agents edit files in parallel here. .env rides along separately.
+STAGE=$(mktemp -d); trap 'rm -rf "$STAGE"' EXIT
+git archive HEAD | tar -x -C "$STAGE"
+cp .env "$STAGE/.env"
+echo "deploying $(git rev-parse --short HEAD): $(git log -1 --pretty=%s | cut -c1-60)"
 rsync -az --delete \
-  --exclude node_modules --exclude 'data/' --exclude '.venv' --exclude '__pycache__' --exclude '.git' \
-  --exclude 'apps/android/app/build' --exclude 'apps/android/.gradle' --exclude 'apps/android/build' \
-  ./ root@$IP:/opt/opportune/
+  --exclude node_modules --exclude 'data/' --exclude '.venv' --exclude '__pycache__' \
+  "$STAGE/" root@$IP:/opt/opportune/
 ssh root@$IP bash -s <<REMOTE
 set -eu
 cd /opt/opportune

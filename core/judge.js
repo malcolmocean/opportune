@@ -76,7 +76,7 @@ Past ratings from this person on your earlier calls are the strongest signal of 
         now: now(),
         output: { verdict: 'suppress|nudge|ask', reasoning: 'one sentence', text: 'nudge text if nudge', actions: [{ key: 'yes', label: 'On it' }, { key: 'no', label: 'Not now' }], ask: { kind: 'availability', text: 'question for the other agent' } },
       }
-      const out = await ctx.llm.json({ system, messages: [{ role: 'user', content: JSON.stringify(user, null, 1) }] })
+      const out = await ctx.llm.json({ system, messages: [{ role: 'user', content: JSON.stringify(user, null, 1) }] }, { personId: person.id, process: 'judge' })
       if (!out?.verdict) return { verdict: 'suppress', reasoning: 'model returned nothing parseable' }
       if (out.verdict === 'nudge' && !out.actions?.length) out.actions = defaultActions(opp)
       return out

@@ -147,6 +147,22 @@ create table if not exists contacts (
 );
 create index if not exists contacts_value on contacts(kind, value);
 create table if not exists kv (k text primary key, v json);
+create table if not exists llm_usage (
+  id text primary key,
+  person_id text,                   -- who the call was on behalf of (null for system-wide calls)
+  process text not null,            -- judge | agent-chat | query:<kind> | source:<id> | ...
+  model text not null,
+  input_tokens integer not null default 0,
+  output_tokens integer not null default 0,
+  cache_read_tokens integer not null default 0,
+  cache_write_tokens integer not null default 0,
+  cost_usd real,                    -- null when the model is not in the price table
+  duration_ms integer,
+  at text not null,
+  created_at text not null
+);
+create index if not exists llm_usage_person_at on llm_usage(person_id, at);
+create index if not exists llm_usage_process_at on llm_usage(process, at);
 `
 
 export function openDb(path = process.env.DB_PATH || './data/opportune.db') {

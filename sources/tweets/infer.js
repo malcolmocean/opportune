@@ -4,14 +4,14 @@
 const BATCH = 20
 const KINDS = new Set(['travel', 'event', 'hangout'])
 
-export async function inferBatch(ctx, tweets, { tz } = {}) {
+export async function inferBatch(ctx, tweets, { tz, personId } = {}) {
   const out = {}
   if (!tweets.length) return out
   if (ctx.llm?.enabled) {
     for (let i = 0; i < tweets.length; i += BATCH) {
       const chunk = tweets.slice(i, i + BATCH)
       let res = null
-      try { res = await llmInfer(ctx, chunk, tz) } catch (e) { ctx.log?.('tweets').warn('llm inference failed, falling back to regex:', e.message) }
+      try { res = await llmInfer(ctx, chunk, tz, personId) } catch (e) { ctx.log?.('tweets').warn('llm inference failed, falling back to regex:', e.message) }
       for (const t of chunk) out[t.id] = res ? clean(res[t.id]) : regexInfer(t.text, t.createdAt, tz)
     }
     return out
@@ -27,9 +27,9 @@ Resolve relative times ("tonight", "this weekend", "Thursday", "Oct 14-18") agai
 Respond with one JSON object keyed by tweet id. Include only tweets that reveal something; omit the rest (an empty object {} is fine).
 Each value: { "place": "City" or "Neighborhood, City" with abbreviations expanded (SF -> San Francisco, NYC -> New York) or null, "window": { "start": ISO 8601 with offset, "end": ISO 8601 with offset } or null, "kind": "travel" | "event" | "hangout" | null }`
 
-async function llmInfer(ctx, chunk, tz) {
+async function llmInfer(ctx, chunk, tz, personId) {
   const user = { timezone: tz || 'UTC', tweets: chunk.map(t => ({ id: t.id, created_at: t.createdAt, text: t.text })) }
-  const res = await ctx.llm.json({ system: SYSTEM, messages: [{ role: 'user', content: JSON.stringify(user, null, 1) }], maxTokens: 2048 })
+  const res = await ctx.llm.json({ system: SYSTEM, messages: [{ role: 'user', content: JSON.stringify(user, null, 1) }], maxTokens: 2048 }, { personId, process: 'source:tweets' })
   if (!res || typeof res !== 'object') throw new Error('no parseable JSON')
   return res
 }

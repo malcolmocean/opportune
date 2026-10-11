@@ -13,27 +13,50 @@ h1{font-size:1.4rem;margin:0 0 4px}.mute{color:var(--mute)}
 .row{display:flex;gap:14px;flex-wrap:wrap;font-size:.9rem}.row span b{font-weight:600}
 .src{display:flex;gap:6px;flex-wrap:wrap}
 table{width:100%;border-collapse:collapse;font-size:.85rem;margin-top:16px}td,th{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--mute);font-weight:500}
+h2{font-size:1.1rem;margin:22px 0 4px}
+.spend{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin:0 0 10px}.spend .line{display:flex;gap:14px;flex-wrap:wrap;font-size:.95rem}.spend .line b{font-weight:600}
+.spend .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:760px){.spend .grid{grid-template-columns:1fr}}
+.spend table{margin-top:8px}.spend td.n,.spend th.n{text-align:right;font-family:ui-monospace,monospace;font-variant-numeric:tabular-nums;white-space:nowrap}.spend td.zero{color:var(--mute);opacity:.5}
 </style></head><body>
 <h1>opportune admin</h1><div class="mute" id="meta">loading…</div>
 <div class="totals" id="totals"></div>
+<h2>Token spend</h2>
+<div class="spend" id="spend"><span class="mute">loading…</span></div>
 <div id="people"></div>
-<h2 style="font-size:1.1rem;margin:22px 0 4px">Recent opportunities</h2>
+<h2>Recent opportunities</h2>
 <table id="opps"><thead><tr><th>when</th><th>kind</th><th>summary</th><th>status</th></tr></thead><tbody></tbody></table>
 <script>
 const token = new URLSearchParams(location.search).get('token')
 const ago = iso => { if (!iso) return 'never'; const m = Math.round((Date.now() - new Date(iso)) / 60000); return m < 60 ? m + 'm ago' : m < 1440 ? Math.round(m / 60) + 'h ago' : Math.round(m / 1440) + 'd ago' }
-const esc = s => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+const usd = v => '$' + (v || 0).toFixed(v >= 10 ? 0 : v >= 1 ? 2 : 3)
+const num = v => { v = v || 0; return v >= 1e6 ? (v / 1e6).toFixed(1) + 'M' : v >= 1e4 ? Math.round(v / 1e3) + 'k' : v >= 1e3 ? (v / 1e3).toFixed(1) + 'k' : String(v) }
+const spendHtml = (u, pd, people) => {
+  const t = u.total
+  const line = `<div class="line"><span><b>${usd(t.cost_usd)}</b> est. last 30d</span><span><b>${num(t.calls)}</b> calls</span><span><b>${num(t.input_tokens)}</b> in · <b>${num(t.output_tokens)}</b> out</span>${t.cache_read_tokens || t.cache_write_tokens ? `<span><b>${num(t.cache_read_tokens)}</b> cache read · <b>${num(t.cache_write_tokens)}</b> cache write</span>` : ''}${t.unpriced_calls ? `<span class="mute">${t.unpriced_calls} unpriced call(s)</span>` : ''}</div>`
+  if (!t.calls) return line + '<div class="mute" style="margin-top:6px">no LLM calls recorded yet</div>'
+  const proc = `<table><thead><tr><th>process (30d)</th><th class="n">calls</th><th class="n">in</th><th class="n">out</th><th class="n">est. $</th></tr></thead><tbody>${u.byProcess.map(r => `<tr><td>${esc(r.process)}</td><td class="n">${num(r.calls)}</td><td class="n">${num(r.input_tokens)}</td><td class="n">${num(r.output_tokens)}</td><td class="n">${usd(r.cost_usd)}</td></tr>`).join('')}</tbody></table>`
+  const days = [...Array(7)].map((_, i) => new Date(Date.now() - (6 - i) * 864e5).toISOString().slice(0, 10))
+  const names = Object.fromEntries(people.map(p => [p.id, p.name]))
+  const by = {}
+  for (const r of pd) { const k = r.person_id || '—'; (by[k] ||= { name: r.name || names[k] || (r.person_id ? r.person_id.slice(0, 8) : 'system'), total: 0, days: {} }); by[k].days[r.day] = r; by[k].total += r.cost_usd || 0 }
+  const rows = Object.values(by).sort((a, b) => b.total - a.total)
+  const cell = r => r ? `<td class="n" title="${r.calls} call(s) · ${num(r.input_tokens)} in · ${num(r.output_tokens)} out">${usd(r.cost_usd)}</td>` : '<td class="n zero">·</td>'
+  const pp = `<table><thead><tr><th>person (7d)</th>${days.map(d => `<th class="n">${d.slice(5)}</th>`).join('')}<th class="n">total</th></tr></thead><tbody>${rows.map(r => `<tr><td>${esc(r.name)}</td>${days.map(d => cell(r.days[d])).join('')}<td class="n"><b>${usd(r.total)}</b></td></tr>`).join('') || '<tr><td colspan="9" class="mute">nothing in the last 7 days</td></tr>'}</tbody></table>`
+  return line + `<div class="grid"><div>${proc}</div><div>${pp}</div></div>`
+}
 fetch('/api/admin/overview', { headers: { 'x-admin-token': token || '' } }).then(r => r.json()).then(d => {
   if (d.error) { document.getElementById('meta').textContent = d.error; return }
   document.getElementById('meta').textContent = `${d.node} · llm ${d.llm ? 'on' : 'off'} · ${new Date(d.now).toLocaleString()}`
   const t = d.totals
   document.getElementById('totals').innerHTML = [['people', t.local], ['remote', t.remote], ['shadow', t.shadow], ['opportunities', t.opportunities], ['decisions', t.decisions], ['nudges', t.nudges], ['queries', t.queries]].map(([k, v]) => `<div><b>${v}</b><span class="mute">${k}</span></div>`).join('')
+  if (d.usage) document.getElementById('spend').innerHTML = spendHtml(d.usage, d.usagePersonDay7d || [], d.people)
   document.getElementById('people').innerHTML = d.people.map(p => `<div class="p">
     <div class="head"><b>${esc(p.name)}</b>
       ${p.remote ? '<span class="tag dim">remote</span>' : p.shadow ? '<span class="tag dim">shadow</span>' : `<span class="tag ${p.onboarding === 'done' ? 'ok' : ''}">${esc(p.onboarding || '?')}${p.via ? ' via ' + esc(p.via) : ''}</span>`}
       ${p.channels.map(c => `<span class="tag">${esc(c)}</span>`).join('')}
       ${p.home ? '<span class="tag ok">home</span>' : '<span class="tag dim">no home</span>'}
-      <span class="mute" style="margin-left:auto;font-size:.8rem">joined ${ago(p.createdAt)}</span></div>
+      <span class="mute" style="margin-left:auto;font-size:.8rem">${p.usage7d ? `<span class="tag${p.usage7d.calls ? '' : ' dim'}" title="${p.usage7d.calls} LLM call(s), ${num(p.usage7d.tokens)} tokens, last 7 days">7d: ${usd(p.usage7d.costUsd)}</span> · ` : ''}joined ${ago(p.createdAt)}</span></div>
     <div class="src">${p.sources.length ? p.sources.map(s => `<span class="tag ${s.error ? 'bad' : s.enabled ? 'ok' : 'dim'}" title="${esc(s.error || '')}">${esc(s.id)}${s.lastPoll ? ' · ' + ago(s.lastPoll) : ''}${s.error ? ' ⚠' : ''}</span>`).join('') : '<span class="mute">no connectors</span>'}</div>
     <div class="row"><span><b>${p.friendsOut}</b> friends out · <b>${p.friendsIn}</b> in · <b>${p.wantMore}</b> wantMore · <b>${p.invitesOpen}</b> open invites</span>
       <span><b>${p.observations.c}</b> observations, last ${ago(p.observations.last)}</span>

@@ -34,7 +34,7 @@ export default {
       .filter(t => !ctx.db.get('select 1 from observations where person_id = ? and source_id = ? and dedupe_key = ?', person.id, 'tweets', String(t.tweet_id)))
       .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
     if (!fresh.length) return []
-    const inferred = await inferBatch(ctx, fresh.map(t => ({ id: String(t.tweet_id), text: t.full_text, createdAt: t.created_at })), { tz: person.tz })
+    const inferred = await inferBatch(ctx, fresh.map(t => ({ id: String(t.tweet_id), text: t.full_text, createdAt: t.created_at })), { tz: person.tz, personId: person.id })
     return fresh.map(t => {
       const id = String(t.tweet_id), inf = inferred[id] || {}
       const user = t.username || handle

@@ -42,7 +42,7 @@ Never reveal a friend's private 'travel' number or notes about them. Today is ${
     async chat(personId, text) {
       const person = ctx.people.get(personId)
       remember(personId, 'user', text)
-      const { text: reply } = await ctx.llm.agent({ system: A.system(person), messages: history(personId), tools: A.tools(person) })
+      const { text: reply } = await ctx.llm.agent({ system: A.system(person), messages: history(personId), tools: A.tools(person) }, { personId, process: 'agent-chat' })
       remember(personId, 'assistant', reply)
       return reply
     },

@@ -112,7 +112,7 @@ For each message decide:
 Output: { "items": [{ "i": <message index>, "inferredPlace": string|null, "inferredWindow": object|null, "subject": "owner"|"contact"|null, "urgent": boolean, "summary": "one line, only when urgent: who wants what by when" }] }. Include only messages where you extracted something.`,
     messages: [{ role: 'user', content: JSON.stringify({ nowIso: new Date().toISOString(), tz: person.tz, messages: msgs.map((m, i) => ({ i, chat: m.chat, network: m.network, sender: m.sender, isFromMe: m.isFromMe, at: m.at, text: m.text })) }) }],
     maxTokens: 2048,
-  })
+  }, { personId: person.id, process: 'source:opjack' })
   const by = {}
   for (const it of out?.items || []) if (Number.isInteger(it?.i) && msgs[it.i]) by[it.i] = it
   return by

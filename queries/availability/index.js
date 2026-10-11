@@ -21,7 +21,7 @@ export default {
 Reveal only what the relationship allows: tier 'trusted' may hear event titles and current place; 'friend' may hear "has something on" and rough place type; 'acquaintance' only yes/no-ish. Never reveal exact location or private notes. Keep reason under 20 words, phrased for the asker.
 Output: { "answer": "yes|likely|unlikely|no", "confidence": 0-1, "reason": "...", "revealed": { what you chose to disclose } }`,
       messages: [{ role: 'user', content: JSON.stringify({ question: text, context, window: { start, end }, nowIso: new Date().toISOString(), tz: to.tz, calendarInWindow: events.map(e => ({ title: e.data.title, at: e.at, until: e.until, location: e.data.location })), latestLocation: loc ? { placeName: loc.data.placeName, ageMin: ctx.geo.minutesAgo(loc.at) } : null, status: status?.data, recentIntents: intents.map(i => i.data), relationshipNoteForAnswerer: relationship.note }) }],
-    })
+    }, { personId: to.id, process: 'query:availability' })
     return out?.answer ? out : { answer: 'unlikely', confidence: 0.3, reason: 'could not tell' }
   },
 }

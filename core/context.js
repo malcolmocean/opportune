@@ -20,7 +20,7 @@ export async function buildContext(env = process.env, { dbPath } = {}) {
   const db = openDb(dbPath)
   const ctx = { db, env, events: new EventEmitter(), log, geo }
   ctx.plugins = await loadPlugins()
-  ctx.llm = makeLlm(env)
+  ctx.llm = makeLlm(env, db)
   ctx.people = makePeople(db, env, ctx.events)
   ctx.observations = makeObservations(db, ctx)
   ctx.opportunities = makeOpportunities(db, ctx)

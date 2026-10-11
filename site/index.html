@@ -61,6 +61,7 @@ p { margin: 0; max-width: 62ch }
 .spectrum-text { background: var(--spectrum); -webkit-background-clip: text; background-clip: text; color: transparent }
 
 /* ---------- nav ---------- */
+.nav { position: relative; z-index: 10 }
 .nav { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 20px }
 .brand { display: flex; align-items: center; gap: 10px; font: 600 1.15rem/1 var(--display); text-decoration: none }
 .brand img { width: 30px; height: 30px; border-radius: 8px }
@@ -73,7 +74,7 @@ p { margin: 0; max-width: 62ch }
 /* ---------- hero ---------- */
 .hero { position: relative; padding-block: 40px 96px; isolation: isolate }
 .hero::before {
-  content: ""; position: absolute; inset: -20% -10% 0; z-index: -1;
+  content: ""; position: absolute; inset: -20% -10% 0; z-index: -1; pointer-events: none;
   background:
     radial-gradient(40% 50% at 22% 30%, rgba(255,107,61,.28), transparent 70%),
     radial-gradient(40% 55% at 50% 40%, rgba(214,63,198,.22), transparent 70%),

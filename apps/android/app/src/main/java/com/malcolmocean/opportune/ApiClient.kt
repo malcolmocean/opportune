@@ -11,7 +11,8 @@ import java.net.URL
 
 /**
  * Every request is a JSON POST to the one ingest URL. The server-side source (sources/opportuneApp)
- * dispatches on shape: a location array, { fcmToken }, { nudgeResponse }, { status }, { contacts }.
+ * dispatches on shape: a location array, { fcmToken }, { nudgeResponse }, { contacts }. (Porchlight/status
+ * is set by the web app itself, not by the shell.)
  */
 object ApiClient {
     private const val TAG = "ApiClient"
@@ -70,9 +71,6 @@ object ApiClient {
 
     fun respond(context: Context, nudgeId: String, key: String): Boolean =
         post(context, JSONObject().put("nudgeResponse", JSONObject().put("nudgeId", nudgeId).put("key", key)).toString()) in 200..299
-
-    fun setPorchlight(context: Context, status: String): Boolean =
-        post(context, JSONObject().put("status", JSONObject().put("porchlight", status)).toString()) in 200..299
 
     fun postContacts(context: Context, contacts: JSONArray): Boolean =
         post(context, JSONObject().put("contacts", contacts).toString()) in 200..299

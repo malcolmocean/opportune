@@ -28,7 +28,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
             return PendingIntent.getBroadcast(context, requestCode, i, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         }
 
-        /** Shared by the notification buttons and the in-app list. onDone runs after the POST attempt. */
+        /** Used by the notification buttons. onDone runs after the POST attempt. */
         fun respond(context: Context, nudgeId: String, key: String, onDone: (() -> Unit)? = null) {
             Prefs.markResponded(context, nudgeId, key)
             context.getSystemService(NotificationManager::class.java).cancel(nudgeId, FCMService.notificationId(nudgeId))

@@ -1,195 +1,395 @@
 package com.malcolmocean.opportune
 
 import android.Manifest
+import android.annotation.SuppressLint
+import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.location.Location
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
-import android.text.format.DateUtils
 import android.util.Log
 import android.view.View
+import android.webkit.ConsoleMessage
+import android.webkit.GeolocationPermissions
+import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.EditText
-import android.widget.LinearLayout
-import android.widget.Switch
 import android.widget.TextView
-import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.CancellationTokenSource
 import com.google.firebase.FirebaseApp
 import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import java.time.Instant
+import java.time.format.DateTimeFormatter
 
 /**
- * One screen: setup (paste the ingest URL), porchlight, review link, contacts opt-in, recent nudges.
- * Saving a URL kicks off the permission chain (notifications → location → background → motion) and
- * then starts LocationService and registers the FCM token.
+ * The shell. A full-screen WebView loads `<node>/app?token=<token>[#nudges]` and exposes
+ * `window.opportuneNative` (see docs/APP-BRIDGE.md). Everything a person sees is the web app; this
+ * class only does what a browser can't: permissions, background location, FCM, contacts, deep links.
+ * If the node can't be reached a small native screen offers Retry and a node URL field.
  */
 class MainActivity : AppCompatActivity() {
 
-    companion object { private const val TAG = "MainActivity" }
-
-    private lateinit var urlInput: EditText
-    private lateinit var statusText: TextView
-    private lateinit var porchlightState: TextView
-    private lateinit var contactsSwitch: Switch
-    private lateinit var contactsState: TextView
-    private lateinit var nudgesContainer: LinearLayout
-
-    private val nudgesChanged = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) { renderNudges() }
+    companion object {
+        private const val TAG = "MainActivity"
+        private const val BG_COLOR = 0xFF090B22.toInt()
+        private const val NUDGES_HASH = "#nudges"
     }
 
-    // ---- permission chain ----
-    private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { requestLocation() }
+    private lateinit var webView: WebView
+    private lateinit var fallback: View
+    private lateinit var fallbackMessage: TextView
+    private lateinit var nodeInput: EditText
+    private lateinit var fused: FusedLocationProviderClient
+
+    /** True once the current main-frame load finished without a main-frame error. */
+    @Volatile private var pageReady = false
+    private var loadFailed = false
+    /** getCurrentLocation() was asked for before we had location permission; deliver after the chain. */
+    private var pendingFix = false
+    /** A notification tap arrived while the page was loading; apply #nudges once it is ready. */
+    private var pendingNudgesHash = false
+
+    private val nudgeReceived = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val id = intent.getStringExtra("nudgeId") ?: return
+            val actions = try { JSONArray(intent.getStringExtra("actions") ?: "[]") } catch (e: Exception) { JSONArray() }
+            callWeb("onNativeNudge", JSONObject().put("nudgeId", id).put("text", intent.getStringExtra("text") ?: "").put("actions", actions))
+        }
+    }
+    private val nudgesChanged = object : BroadcastReceiver() {
+        // answered from a notification button while the app is open: let the web app refresh its state
+        override fun onReceive(context: Context, intent: Intent) { callWeb("onNativeResume", null) }
+    }
+
+    // ---- permission launchers (the chain: fine/coarse → background → activity recognition) ----
+    private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { emitPermissions() }
 
     private val locationPermission = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
         val ok = granted[Manifest.permission.ACCESS_FINE_LOCATION] == true || granted[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         if (ok) requestBackgroundLocation() else {
-            AlertDialog.Builder(this).setTitle("Location")
-                .setMessage("opportune only works if it knows roughly where you are. Allow location in Settings.")
-                .setPositiveButton("Settings") { _, _ -> openAppSettings() }.setNegativeButton("Later", null).show()
-            renderStatus()
+            pendingFix = false
+            emitPermissions()
+            AlertDialog.Builder(this).setTitle(R.string.perm_location_title)
+                .setMessage(R.string.perm_location_denied)
+                .setPositiveButton(R.string.settings) { _, _ -> openAppSettings() }.setNegativeButton(R.string.later, null).show()
         }
     }
 
-    private val backgroundPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { finishSetup() }
+    private val backgroundPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { requestActivityRecognition() }
+
+    private val activityPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { finishLocationSetup() }
 
     private val contactsPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) { Prefs.setShareContacts(this, true); syncContactsNow() }
-        else { Prefs.setShareContacts(this, false); contactsSwitch.isChecked = false; contactsState.text = "Permission denied." }
+        Prefs.setShareContacts(this, granted)
+        if (granted) syncContactsNow()
+        emitPermissions()
     }
 
+    // ---- lifecycle ----
+    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         setContentView(R.layout.activity_main)
         FCMService.ensureChannel(this)
+        fused = LocationServices.getFusedLocationProviderClient(this)
 
-        urlInput = findViewById(R.id.urlInput)
-        statusText = findViewById(R.id.statusText)
-        porchlightState = findViewById(R.id.porchlightState)
-        contactsSwitch = findViewById(R.id.contactsSwitch)
-        contactsState = findViewById(R.id.contactsState)
-        nudgesContainer = findViewById(R.id.nudgesContainer)
-
-        urlInput.setText(Prefs.ingestUrl(this) ?: "")
-        findViewById<Button>(R.id.saveButton).setOnClickListener { saveUrl() }
-
-        findViewById<Button>(R.id.plOpen).setOnClickListener { setPorchlight("open") }
-        findViewById<Button>(R.id.plAsk).setOnClickListener { setPorchlight("ask") }
-        findViewById<Button>(R.id.plClosed).setOnClickListener { setPorchlight("closed") }
-
-        findViewById<Button>(R.id.reviewButton).setOnClickListener {
-            val node = Prefs.parseIngestUrl(Prefs.ingestUrl(this)) ?: return@setOnClickListener toast("Paste your URL first.")
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(node.reviewUrl)))
+        val root = findViewById<View>(R.id.root)
+        root.setBackgroundColor(BG_COLOR)
+        // Edge-to-edge: the root draws the dark background under the bars and pads the content past them
+        // (plus the keyboard), so the web page never has to know about safe areas.
+        ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
+            v.setPadding(bars.left, bars.top, bars.right, maxOf(bars.bottom, ime.bottom))
+            WindowInsetsCompat.CONSUMED
         }
 
-        contactsSwitch.isChecked = Prefs.shareContacts(this)
-        contactsSwitch.setOnCheckedChangeListener { _, on ->
-            if (!on) { Prefs.setShareContacts(this, false); renderContacts(); return@setOnCheckedChangeListener }
-            if (!Prefs.isConfigured(this)) { contactsSwitch.isChecked = false; return@setOnCheckedChangeListener toast("Paste your URL first.") }
-            if (ContactsSync.hasPermission(this)) { Prefs.setShareContacts(this, true); syncContactsNow() }
-            else contactsPermission.launch(Manifest.permission.READ_CONTACTS)
+        webView = findViewById(R.id.webView)
+        fallback = findViewById(R.id.fallback)
+        fallbackMessage = findViewById(R.id.fallbackMessage)
+        nodeInput = findViewById(R.id.nodeInput)
+        findViewById<Button>(R.id.retryButton).setOnClickListener {
+            val typed = nodeInput.text.toString()
+            val normalized = Prefs.normalizeNodeUrl(typed)
+            if (typed.isNotBlank() && normalized == null) { fallbackMessage.text = getString(R.string.fallback_bad_url); return@setOnClickListener }
+            if (normalized != null && normalized != Prefs.nodeUrl(this)) Prefs.setNodeUrl(this, normalized)
+            loadApp(openNudges = false)
         }
+
+        setupWebView()
+
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (fallback.visibility != View.VISIBLE && webView.canGoBack()) webView.goBack()
+                else { isEnabled = false; onBackPressedDispatcher.onBackPressed() }
+            }
+        })
 
         if (Prefs.isConfigured(this)) {
             LocationService.start(this)
             registerFcmToken()
         }
-        intent?.getStringExtra("nudgeId")?.let { openNudge(it) }
+        loadApp(openNudges = wantsNudges(intent))
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        intent.getStringExtra("nudgeId")?.let { openNudge(it) }
+        if (wantsNudges(intent)) showNudges()
     }
 
     override fun onResume() {
         super.onResume()
+        ContextCompat.registerReceiver(this, nudgeReceived, IntentFilter(FCMService.ACTION_NUDGE_RECEIVED), ContextCompat.RECEIVER_NOT_EXPORTED)
         ContextCompat.registerReceiver(this, nudgesChanged, IntentFilter(FCMService.ACTION_NUDGES_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED)
-        renderAll()
-        lifecycleScope.launch(Dispatchers.IO) { ContactsSync.maybeSync(this@MainActivity)?.let { withContext(Dispatchers.Main) { renderContacts() } } }
+        webView.onResume()
+        if (pageReady) callWeb("onNativeResume", null)
+        lifecycleScope.launch(Dispatchers.IO) { ContactsSync.maybeSync(this@MainActivity) }
     }
 
     override fun onPause() {
         super.onPause()
+        webView.onPause()
+        try { unregisterReceiver(nudgeReceived) } catch (e: IllegalArgumentException) {}
         try { unregisterReceiver(nudgesChanged) } catch (e: IllegalArgumentException) {}
     }
 
-    // ---- setup ----
-    private fun saveUrl() {
-        val raw = urlInput.text.toString().trim()
-        val node = Prefs.parseIngestUrl(raw)
-        if (node == null) {
-            statusText.text = "That doesn't look like an ingest URL. Expected …/ingest/opportuneApp/<token>."
-            return
+    override fun onDestroy() {
+        webView.destroy()
+        super.onDestroy()
+    }
+
+    private fun wantsNudges(i: Intent?) = i?.getBooleanExtra(FCMService.EXTRA_OPEN_NUDGES, false) == true || i?.hasExtra("nudgeId") == true
+
+    // ---- WebView ----
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun setupWebView() {
+        webView.setBackgroundColor(BG_COLOR)
+        webView.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            databaseEnabled = true
+            setGeolocationEnabled(true)
+            mediaPlaybackRequiresUserGesture = false
+            cacheMode = WebSettings.LOAD_DEFAULT
+            setSupportMultipleWindows(false)
+            javaScriptCanOpenWindowsAutomatically = false
+            useWideViewPort = true
+            loadWithOverviewMode = true
+            userAgentString = "$userAgentString opportune-android/${BuildConfig.VERSION_NAME}"
         }
-        statusText.text = "Checking…"
-        lifecycleScope.launch {
-            val code = withContext(Dispatchers.IO) { ApiClient.probe(raw) }
-            when {
-                code == 200 -> {
-                    Prefs.setIngestUrl(this@MainActivity, raw)
-                    statusText.text = "Connected to ${node.baseUrl}."
-                    requestNotifications()
-                }
-                code == 401 || code == 404 -> statusText.text = "The node rejected that token ($code). Ask the bot for a fresh URL (/sources)."
-                code == -1 -> {
-                    // offline, or a local node not reachable from here: keep it anyway so location queues up
-                    Prefs.setIngestUrl(this@MainActivity, raw)
-                    statusText.text = "Saved, but couldn't reach ${node.baseUrl} right now."
-                    requestNotifications()
-                }
-                else -> statusText.text = "Unexpected response $code from ${node.baseUrl}."
+        if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
+        webView.addJavascriptInterface(Bridge(), "opportuneNative")
+
+        webView.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                val url = request.url
+                if (isNodeOrigin(url) || url.scheme == "about" || url.scheme == "blob" || url.scheme == "data") return false
+                openExternal(url.toString())
+                return true
+            }
+
+            override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+                pageReady = false
+                loadFailed = false
+            }
+
+            override fun onPageFinished(view: WebView, url: String?) {
+                if (loadFailed) return
+                pageReady = true
+                hideFallback()
+                if (pendingNudgesHash) { pendingNudgesHash = false; showNudges() }
+                emitPermissions()
+            }
+
+            override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+                if (!request.isForMainFrame) return
+                Log.w(TAG, "load failed: ${error.errorCode} ${error.description} ${request.url}")
+                loadFailed = true; pageReady = false
+                showFallback(getString(R.string.fallback_unreachable, Prefs.nodeUrl(this@MainActivity), error.description))
+            }
+
+            override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
+                if (!request.isForMainFrame || errorResponse.statusCode < 500) return
+                Log.w(TAG, "HTTP ${errorResponse.statusCode} for ${request.url}")
+                loadFailed = true; pageReady = false
+                showFallback(getString(R.string.fallback_http_error, Prefs.nodeUrl(this@MainActivity), errorResponse.statusCode))
+            }
+        }
+
+        webView.webChromeClient = object : WebChromeClient() {
+            override fun onGeolocationPermissionsShowPrompt(origin: String, callback: GeolocationPermissions.Callback) {
+                val node = Uri.parse(Prefs.nodeUrl(this@MainActivity))
+                val ours = isNodeOrigin(Uri.parse(origin))
+                if (ours && !hasLocation()) requestLocationChain()
+                callback.invoke(origin, ours && hasLocation(), false)
+                Log.d(TAG, "geolocation prompt from $origin (node ${node.host}): ${ours && hasLocation()}")
+            }
+
+            override fun onConsoleMessage(m: ConsoleMessage): Boolean {
+                Log.d("WebApp", "${m.message()} (${m.sourceId()}:${m.lineNumber()})")
+                return true
             }
         }
     }
 
-    private fun requestNotifications() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-        } else requestLocation()
+    private fun isNodeOrigin(u: Uri): Boolean {
+        val node = Uri.parse(Prefs.nodeUrl(this))
+        if (u.scheme != "http" && u.scheme != "https") return false
+        if (!u.host.equals(node.host, ignoreCase = true)) return false
+        fun port(x: Uri) = if (x.port > 0) x.port else if (x.scheme == "https") 443 else 80
+        return port(u) == port(node) && u.scheme == node.scheme
     }
 
-    private fun requestLocation() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) requestBackgroundLocation()
-        else {
-            val perms = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) perms.add(Manifest.permission.ACTIVITY_RECOGNITION)
-            locationPermission.launch(perms.toTypedArray())
-        }
+    private fun appUrl(openNudges: Boolean): String {
+        val sb = StringBuilder(Prefs.nodeUrl(this)).append("/app")
+        Prefs.token(this)?.let { sb.append("?token=").append(Uri.encode(it)) }
+        if (openNudges) sb.append(NUDGES_HASH)
+        return sb.toString()
+    }
+
+    private fun loadApp(openNudges: Boolean) {
+        hideFallback()
+        pageReady = false
+        webView.loadUrl(appUrl(openNudges))
+    }
+
+    /** Notification body tapped: switch the already-loaded web app to #nudges (or reload there). */
+    private fun showNudges() {
+        if (fallback.visibility == View.VISIBLE) { loadApp(openNudges = true); return }
+        if (!pageReady) { pendingNudgesHash = true; return }
+        val current = webView.url?.let { Uri.parse(it) }
+        if (current == null || !isNodeOrigin(current)) { loadApp(openNudges = true); return }
+        webView.evaluateJavascript(
+            "if (location.hash !== '$NUDGES_HASH') location.hash = '$NUDGES_HASH'; else window.dispatchEvent(new HashChangeEvent('hashchange'));", null)
+    }
+
+    private fun showFallback(message: String) {
+        fallbackMessage.text = message
+        if (nodeInput.text.isNullOrBlank()) nodeInput.setText(Prefs.nodeUrl(this))
+        fallback.visibility = View.VISIBLE
+        webView.visibility = View.INVISIBLE
+    }
+
+    private fun hideFallback() {
+        fallback.visibility = View.GONE
+        webView.visibility = View.VISIBLE
+    }
+
+    /** window.<fn>(<arg>) on the page, if the page defines it. Safe from any thread. */
+    private fun callWeb(fn: String, arg: Any?) {
+        val js = if (arg == null) "if (typeof window.$fn === 'function') window.$fn();"
+                 else "if (typeof window.$fn === 'function') window.$fn($arg);"
+        runOnUiThread { if (pageReady) webView.evaluateJavascript(js, null) }
+    }
+
+    // ---- permissions ----
+    private fun granted(p: String) = ContextCompat.checkSelfPermission(this, p) == PackageManager.PERMISSION_GRANTED
+    private fun hasLocation() = granted(Manifest.permission.ACCESS_FINE_LOCATION) || granted(Manifest.permission.ACCESS_COARSE_LOCATION)
+    private fun hasBackground() = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || granted(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+    private fun hasActivity() = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || granted(Manifest.permission.ACTIVITY_RECOGNITION)
+    private fun hasNotifications() =
+        (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || granted(Manifest.permission.POST_NOTIFICATIONS)) &&
+            NotificationManagerCompat.from(this).areNotificationsEnabled()
+    private fun hasContacts() = ContactsSync.hasPermission(this) && Prefs.shareContacts(this)
+
+    private fun permissionsJson(): JSONObject = JSONObject()
+        .put("notifications", hasNotifications())
+        .put("location", hasLocation())
+        .put("backgroundLocation", hasLocation() && hasBackground())
+        .put("activity", hasActivity())
+        .put("contacts", hasContacts())
+
+    private fun emitPermissions() = callWeb("onNativePermissions", permissionsJson())
+
+    private fun requestNotificationsChain() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !granted(Manifest.permission.POST_NOTIFICATIONS)) {
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else if (!NotificationManagerCompat.from(this).areNotificationsEnabled()) {
+            // granted at the OS level but switched off in settings: the only way back is the settings screen
+            try {
+                startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
+            } catch (e: ActivityNotFoundException) { openAppSettings() }
+            emitPermissions()
+        } else emitPermissions()
+    }
+
+    private fun requestLocationChain() {
+        if (hasLocation()) requestBackgroundLocation()
+        else locationPermission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
     }
 
     private fun requestBackgroundLocation() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            AlertDialog.Builder(this).setTitle("Location in the background")
-                .setMessage("Pick \"Allow all the time\" on the next screen so opportune can notice when you're near your people while the app is closed.")
-                .setPositiveButton("OK") { _, _ -> backgroundPermission.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION) }
-                .setNegativeButton("Skip") { _, _ -> finishSetup() }
+        if (!hasBackground()) {
+            AlertDialog.Builder(this).setTitle(R.string.perm_background_title)
+                .setMessage(R.string.perm_background_rationale)
+                .setPositiveButton(android.R.string.ok) { _, _ -> backgroundPermission.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION) }
+                .setNegativeButton(R.string.skip) { _, _ -> requestActivityRecognition() }
+                .setOnCancelListener { requestActivityRecognition() }
                 .show()
-        } else finishSetup()
+        } else requestActivityRecognition()
     }
 
-    private fun finishSetup() {
+    private fun requestActivityRecognition() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !hasActivity()) activityPermission.launch(Manifest.permission.ACTIVITY_RECOGNITION)
+        else finishLocationSetup()
+    }
+
+    private fun finishLocationSetup() {
         LocationService.start(this)
         registerFcmToken()
-        renderAll()
+        emitPermissions()
+        if (pendingFix) { pendingFix = false; fetchLocation() }
+    }
+
+    private fun requestContactsChain() {
+        if (ContactsSync.hasPermission(this)) { Prefs.setShareContacts(this, true); syncContactsNow(); emitPermissions() }
+        else contactsPermission.launch(Manifest.permission.READ_CONTACTS)
+    }
+
+    private fun syncContactsNow() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val n = ContactsSync.sync(this@MainActivity)
+            Log.d(TAG, "contacts sync: $n")
+            withContext(Dispatchers.Main) { emitPermissions() }
+        }
     }
 
     private fun registerFcmToken() {
+        if (!Prefs.isConfigured(this)) return
         if (FirebaseApp.getApps(this).isEmpty()) { Log.w(TAG, "Firebase not configured (no google-services.json); push off"); return }
         FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
             if (!task.isSuccessful) { Log.w(TAG, "FCM token unavailable", task.exception); return@addOnCompleteListener }
@@ -197,107 +397,82 @@ class MainActivity : AppCompatActivity() {
             if (Prefs.fcmRegisteredToken(this) == token) return@addOnCompleteListener
             lifecycleScope.launch(Dispatchers.IO) {
                 val ok = ApiClient.registerToken(this@MainActivity, token)
-                withContext(Dispatchers.Main) { renderStatus() }
                 Log.d(TAG, "token registered: $ok")
             }
         }
     }
 
-    // ---- porchlight ----
-    private fun setPorchlight(status: String) {
-        if (!Prefs.isConfigured(this)) return toast("Paste your URL first.")
-        Prefs.setPorchlight(this, status)
-        renderPorchlight()
-        lifecycleScope.launch(Dispatchers.IO) {
-            val ok = ApiClient.setPorchlight(this@MainActivity, status)
-            withContext(Dispatchers.Main) { if (!ok) toast("Couldn't reach your node; try again.") }
-        }
-    }
-
-    // ---- contacts ----
-    private fun syncContactsNow() {
-        contactsState.text = "Syncing…"
-        lifecycleScope.launch {
-            val n = withContext(Dispatchers.IO) { ContactsSync.sync(this@MainActivity) }
-            if (n < 0) contactsState.text = "Sync failed; will retry later." else renderContacts()
-        }
-    }
-
-    // ---- rendering ----
-    private fun renderAll() { renderStatus(); renderPorchlight(); renderContacts(); renderNudges() }
-
-    private fun renderStatus() {
-        val node = Prefs.parseIngestUrl(Prefs.ingestUrl(this))
-        if (node == null) { statusText.text = "Not set up yet. In Telegram: /sources → opportune Android app."; return }
-        val parts = mutableListOf("Node: ${node.baseUrl}")
-        val (at, ok) = Prefs.lastPost(this)
-        if (at > 0) parts.add("Last post ${DateUtils.getRelativeTimeSpanString(at)}${if (ok) "" else " (failed)"}")
-        parts.add(when {
-            FirebaseApp.getApps(this).isEmpty() -> "Push: off (no google-services.json in this build)"
-            Prefs.fcmRegisteredToken(this) != null -> "Push: registered"
-            else -> "Push: registering…"
-        })
-        val loc = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        if (!loc) parts.add("Location permission missing")
-        statusText.text = parts.joinToString("\n")
-    }
-
-    private fun renderPorchlight() {
-        val pl = Prefs.porchlight(this)
-        porchlightState.text = if (pl == null) "Not set from this phone yet." else {
-            val expired = System.currentTimeMillis() - pl.second > 6 * 3600 * 1000L
-            if (expired) "Last set to \"${pl.first}\" ${DateUtils.getRelativeTimeSpanString(pl.second)} (expired)."
-            else "Currently: ${pl.first}, set ${DateUtils.getRelativeTimeSpanString(pl.second)}."
-        }
-    }
-
-    private fun renderContacts() {
-        contactsState.text = when {
-            !Prefs.shareContacts(this) -> "Off."
-            Prefs.contactsSyncedAt(this) == 0L -> "On, not synced yet."
-            else -> "${Prefs.contactsCount(this)} contacts, synced ${DateUtils.getRelativeTimeSpanString(Prefs.contactsSyncedAt(this))}. Re-syncs daily."
-        }
-    }
-
-    private fun renderNudges() {
-        nudgesContainer.removeAllViews()
-        val list = Prefs.nudges(this)
-        if (list.isEmpty()) {
-            nudgesContainer.addView(TextView(this).apply { text = getString(R.string.no_nudges); setTextColor(statusText.currentTextColor) })
-            return
-        }
-        for (n in list) {
-            val row = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 12, 0, 12) }
-            row.addView(TextView(this).apply { text = n.text; textSize = 15f })
-            val meta = if (n.response != null) "${DateUtils.getRelativeTimeSpanString(n.at)} · you said: ${n.actions.firstOrNull { it.first == n.response }?.second ?: n.response}"
-                       else DateUtils.getRelativeTimeSpanString(n.at).toString()
-            row.addView(TextView(this).apply { text = meta; textSize = 12f; setTextColor(statusText.currentTextColor) })
-            if (n.response == null && n.actions.isNotEmpty()) {
-                val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-                for ((key, label) in n.actions) {
-                    buttons.addView(Button(this, null, android.R.attr.buttonBarButtonStyle).apply {
-                        text = label; isAllCaps = false
-                        setOnClickListener { NotificationActionReceiver.respond(this@MainActivity, n.id, key); renderNudges() }
-                    })
-                }
-                row.addView(buttons)
+    // ---- one location fix ----
+    @SuppressLint("MissingPermission")
+    private fun fetchLocation() {
+        if (!hasLocation()) { pendingFix = true; requestLocationChain(); return }
+        val cts = CancellationTokenSource()
+        fused.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, cts.token)
+            .addOnSuccessListener { l ->
+                if (l != null) emitLocation(l)
+                else fused.lastLocation.addOnSuccessListener { last -> if (last != null) emitLocation(last) else emitLocationError("unavailable") }
+                    .addOnFailureListener { e -> emitLocationError(e.message ?: "unavailable") }
             }
-            row.setOnClickListener { openNudge(n.id) }
-            nudgesContainer.addView(row)
-            nudgesContainer.addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1); setBackgroundColor(0x22888888) })
-        }
+            .addOnFailureListener { e -> emitLocationError(e.message ?: "unavailable") }
     }
 
-    /** Tapping a notification body (or a list row) shows the full text with every action, not just three. */
-    private fun openNudge(id: String) {
-        val n = Prefs.nudges(this).firstOrNull { it.id == id } ?: return
-        if (n.response != null || n.actions.isEmpty()) { AlertDialog.Builder(this).setMessage(n.text).setPositiveButton("OK", null).show(); return }
-        val labels = n.actions.map { it.second }.toTypedArray()
-        AlertDialog.Builder(this).setMessage(n.text)
-            .setItems(labels) { _, i -> NotificationActionReceiver.respond(this, n.id, n.actions[i].first); renderNudges() }
-            .setNegativeButton("Later", null).show()
+    private fun emitLocation(l: Location) {
+        callWeb("onNativeLocation", JSONObject()
+            .put("lat", l.latitude).put("lng", l.longitude)
+            .put("acc", if (l.hasAccuracy()) l.accuracy.toDouble() else JSONObject.NULL)
+            .put("at", DateTimeFormatter.ISO_INSTANT.format(Instant.ofEpochMilli(l.time))))
+    }
+
+    private fun emitLocationError(reason: String) = callWeb("onNativeLocation", JSONObject().put("error", reason))
+
+    // ---- misc ----
+    private fun openExternal(url: String) {
+        try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        catch (e: ActivityNotFoundException) { Log.w(TAG, "nothing handles $url") }
     }
 
     private fun openAppSettings() = startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)))
-    private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
+
+    /** window.opportuneNative — the contract in docs/APP-BRIDGE.md. Methods run on the WebView's bridge thread. */
+    inner class Bridge {
+        @JavascriptInterface fun getNodeUrl(): String = Prefs.nodeUrl(this@MainActivity)
+
+        @JavascriptInterface fun getIngestUrl(): String = Prefs.ingestUrl(this@MainActivity) ?: ""
+
+        @JavascriptInterface fun setIngestUrl(url: String?) {
+            val parsed = Prefs.parseIngestUrl(url)
+            if (parsed == null) { Log.w(TAG, "setIngestUrl: not an ingest URL: $url"); return }
+            Prefs.setIngestUrl(this@MainActivity, url)
+            Log.d(TAG, "ingest URL set for node ${parsed.baseUrl}")
+            runOnUiThread {
+                LocationService.start(this@MainActivity)
+                registerFcmToken()
+                lifecycleScope.launch(Dispatchers.IO) { ContactsSync.maybeSync(this@MainActivity) }
+            }
+        }
+
+        @JavascriptInterface fun getPermissions(): String = permissionsJson().toString()
+
+        @JavascriptInterface fun requestLocation() { runOnUiThread { requestLocationChain() } }
+
+        @JavascriptInterface fun requestNotifications() { runOnUiThread { requestNotificationsChain() } }
+
+        @JavascriptInterface fun requestContacts() { runOnUiThread { requestContactsChain() } }
+
+        /** Not in the contract: turns the daily contacts sync back off (the OS permission stays). */
+        @JavascriptInterface fun stopContacts() { Prefs.setShareContacts(this@MainActivity, false); emitPermissions() }
+
+        @JavascriptInterface fun getCurrentLocation() { runOnUiThread { fetchLocation() } }
+
+        @JavascriptInterface fun openExternal(url: String?) { if (!url.isNullOrBlank()) runOnUiThread { this@MainActivity.openExternal(url) } }
+
+        @JavascriptInterface fun getDeviceInfo(): String = JSONObject()
+            .put("model", Build.MODEL)
+            .put("manufacturer", Build.MANUFACTURER)
+            .put("androidVersion", Build.VERSION.RELEASE)
+            .put("sdk", Build.VERSION.SDK_INT)
+            .put("appVersion", BuildConfig.VERSION_NAME)
+            .put("versionCode", BuildConfig.VERSION_CODE)
+            .toString()
+    }
 }

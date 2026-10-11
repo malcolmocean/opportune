@@ -13,7 +13,7 @@ import org.json.JSONObject
 
 /**
  * Opt-in: read names + emails + phones and POST { contacts: [...] } in batches of 200.
- * Runs when the switch is turned on and at most once a day after that (from the heartbeat or app open).
+ * Runs when the web app's requestContacts() is granted and at most once a day after that (from the heartbeat or app open).
  */
 object ContactsSync {
     private const val TAG = "ContactsSync"

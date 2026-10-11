@@ -4,4 +4,8 @@
     <color name="brand_dark">#1f2fa6</color>
     <color name="accent">#f28c28</color>
     <color name="ic_launcher_background">#2b3fd8</color>
+    <!-- the web app's page background; shown behind the WebView while it loads and under the system bars -->
+    <color name="bg">#090b22</color>
+    <color name="fg">#f2f3fa</color>
+    <color name="fg_muted">#a4a8c7</color>
 </resources>

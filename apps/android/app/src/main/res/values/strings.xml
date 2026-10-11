@@ -1,21 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">opportune</string>
-    <string name="setup_label">Paste the URL the Telegram bot gave you (…/ingest/opportuneApp/…)</string>
-    <string name="setup_hint">https://your-node/ingest/opportuneApp/token</string>
-    <string name="save">Save</string>
-    <string name="porchlight">Porchlight</string>
-    <string name="porchlight_help">Drop-ins at your place for the next 6 hours</string>
-    <string name="pl_open">Open</string>
-    <string name="pl_ask">Ask</string>
-    <string name="pl_closed">Closed</string>
-    <string name="review">Review</string>
-    <string name="review_help">What it nudged about and what it stayed quiet about</string>
-    <string name="open_review">Open review page</string>
-    <string name="contacts">Share contacts</string>
-    <string name="contacts_help">So opportune can tell you when someone you know joins, and name people on guest lists. Stays on your node.</string>
-    <string name="nudges">Recent nudges</string>
-    <string name="no_nudges">Nothing yet. Nudges arrive here as notifications.</string>
+
+    <!-- offline fallback -->
+    <string name="retry">Retry</string>
+    <string name="change_node">Change node</string>
+    <string name="node_hint">https://opportune.club</string>
+    <string name="fallback_unreachable">Couldn\'t reach %1$s.\n%2$s</string>
+    <string name="fallback_http_error">%1$s answered with an error (%2$d). Try again in a moment.</string>
+    <string name="fallback_bad_url">That doesn\'t look like a URL. Try something like https://opportune.club</string>
+
+    <!-- permission dialogs -->
+    <string name="perm_location_title">Location</string>
+    <string name="perm_location_denied">opportune only works if it knows roughly where you are. Allow location in Settings.</string>
+    <string name="perm_background_title">Location in the background</string>
+    <string name="perm_background_rationale">Pick "Allow all the time" on the next screen so opportune can notice when you\'re near your people while the app is closed.</string>
+    <string name="settings">Settings</string>
+    <string name="later">Later</string>
+    <string name="skip">Skip</string>
+
+    <!-- notification channels -->
     <string name="location_channel_name">Location</string>
     <string name="location_channel_description">Shows while opportune is watching your location</string>
     <string name="location_notification_title">opportune is on</string>

@@ -7,14 +7,17 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Everything the app remembers, in one SharedPreferences file. The ingest URL is the whole config:
+ * Everything the shell remembers, in one SharedPreferences file. The ingest URL is the whole config:
  * it names the node and carries the per-person source token, so it doubles as auth for every POST.
+ * The node URL (where the web app is loaded from) defaults to opportune.club, is derived from the
+ * ingest URL once there is one, and can be overridden from the offline fallback screen.
  */
 object Prefs {
+    const val DEFAULT_NODE_URL = "https://opportune.club"
+
     private const val FILE = "opportune"
     private const val KEY_URL = "ingestUrl"
-    private const val KEY_PORCHLIGHT = "porchlight"
-    private const val KEY_PORCHLIGHT_AT = "porchlightAt"
+    private const val KEY_NODE_URL = "nodeUrl"
     private const val KEY_CONTACTS = "shareContacts"
     private const val KEY_CONTACTS_SYNC = "contactsSyncedAt"
     private const val KEY_CONTACTS_COUNT = "contactsCount"
@@ -31,10 +34,30 @@ object Prefs {
         sp(c).edit().putString(KEY_URL, url?.trim()).remove(KEY_FCM_REGISTERED).apply()
     }
     fun isConfigured(c: Context) = parseIngestUrl(ingestUrl(c)) != null
+    fun token(c: Context): String? = parseIngestUrl(ingestUrl(c))?.token
 
-    data class Node(val baseUrl: String, val sourceId: String, val token: String) {
-        val reviewUrl get() = "$baseUrl/web/manage?token=$token"
+    /** Explicit override (fallback screen) > base of the ingest URL > DEFAULT_NODE_URL. No trailing slash. */
+    fun nodeUrl(c: Context): String {
+        val override = sp(c).getString(KEY_NODE_URL, null)?.takeIf { it.isNotBlank() }
+        return normalizeNodeUrl(override) ?: parseIngestUrl(ingestUrl(c))?.baseUrl ?: DEFAULT_NODE_URL
     }
+    fun setNodeUrl(c: Context, url: String?) {
+        val n = normalizeNodeUrl(url)
+        sp(c).edit().apply { if (n == null) remove(KEY_NODE_URL) else putString(KEY_NODE_URL, n) }.apply()
+    }
+
+    /** "opportune.club", "https://opportune.club/", "http://192.168.1.10:3400" → scheme://host[:port]; junk → null. */
+    fun normalizeNodeUrl(raw: String?): String? {
+        var s = raw?.trim() ?: return null
+        if (s.isBlank()) return null
+        if (!s.contains("://")) s = "https://$s"
+        val u = Uri.parse(s)
+        if (u.scheme != "http" && u.scheme != "https" || u.host.isNullOrBlank()) return null
+        val port = if (u.port > 0) ":${u.port}" else ""
+        return "${u.scheme}://${u.host}$port"
+    }
+
+    data class Node(val baseUrl: String, val sourceId: String, val token: String)
 
     /** http(s)://node[:port]/ingest/<sourceId>/<token> → Node; anything else → null. */
     fun parseIngestUrl(url: String?): Node? {
@@ -46,13 +69,6 @@ object Prefs {
         val port = if (u.port > 0) ":${u.port}" else ""
         return Node("${u.scheme}://${u.host}$port", segs[1], segs[2])
     }
-
-    fun porchlight(c: Context): Pair<String, Long>? {
-        val s = sp(c).getString(KEY_PORCHLIGHT, null) ?: return null
-        return s to sp(c).getLong(KEY_PORCHLIGHT_AT, 0L)
-    }
-    fun setPorchlight(c: Context, status: String) =
-        sp(c).edit().putString(KEY_PORCHLIGHT, status).putLong(KEY_PORCHLIGHT_AT, System.currentTimeMillis()).apply()
 
     fun shareContacts(c: Context) = sp(c).getBoolean(KEY_CONTACTS, false)
     fun setShareContacts(c: Context, on: Boolean) = sp(c).edit().putBoolean(KEY_CONTACTS, on).apply()
@@ -68,12 +84,13 @@ object Prefs {
     fun fcmRegisteredToken(c: Context): String? = sp(c).getString(KEY_FCM_REGISTERED, null)
     fun setFcmRegisteredToken(c: Context, t: String?) = sp(c).edit().putString(KEY_FCM_REGISTERED, t).apply()
 
-    // ---- recent nudges, newest first, kept locally from FCM payloads ----
+    // ---- recent nudges, newest first, kept locally from FCM payloads (for notification bookkeeping) ----
     data class Nudge(val id: String, val text: String, val actions: List<Pair<String, String>>, val at: Long, val response: String?) {
         fun toJson(): JSONObject = JSONObject().apply {
             put("id", id); put("text", text); put("at", at); put("response", response ?: JSONObject.NULL)
-            put("actions", JSONArray().apply { actions.forEach { (k, l) -> put(JSONObject().put("key", k).put("label", l)) } })
+            put("actions", actionsJson())
         }
+        fun actionsJson(): JSONArray = JSONArray().apply { actions.forEach { (k, l) -> put(JSONObject().put("key", k).put("label", l)) } }
         companion object {
             fun fromJson(o: JSONObject): Nudge {
                 val acts = o.optJSONArray("actions") ?: JSONArray()

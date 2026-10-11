@@ -17,14 +17,20 @@ import kotlinx.coroutines.launch
 
 /**
  * Receives data messages { nudgeId, text, actions: JSON [{key,label}] } from channels/fcm and shows a
- * heads-up notification with up to three action buttons. The nudge is also kept locally for the main screen.
+ * heads-up notification with up to three action buttons. Tapping the body opens the shell at #nudges;
+ * the buttons POST { nudgeResponse } natively (NotificationActionReceiver). If the shell is in the
+ * foreground it also gets the nudge via ACTION_NUDGE_RECEIVED → window.onNativeNudge.
  */
 class FCMService : FirebaseMessagingService() {
 
     companion object {
         private const val TAG = "FCMService"
         const val NUDGE_CHANNEL_ID = "nudges"
+        /** A nudge just arrived; extras: nudgeId, text, actions (JSON string). */
+        const val ACTION_NUDGE_RECEIVED = "com.malcolmocean.opportune.NUDGE_RECEIVED"
+        /** A nudge was answered natively (notification button); the web app should refresh. */
         const val ACTION_NUDGES_CHANGED = "com.malcolmocean.opportune.NUDGES_CHANGED"
+        const val EXTRA_OPEN_NUDGES = "openNudges"
         private const val MAX_BUTTONS = 3
 
         fun ensureChannel(context: Context) {
@@ -43,7 +49,10 @@ class FCMService : FirebaseMessagingService() {
             val nid = notificationId(nudge.id)
             val open = PendingIntent.getActivity(
                 context, nid,
-                Intent(context, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP; putExtra("nudgeId", nudge.id) },
+                Intent(context, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    putExtra(EXTRA_OPEN_NUDGES, true); putExtra("nudgeId", nudge.id)
+                },
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
             val b = NotificationCompat.Builder(context, NUDGE_CHANNEL_ID)
@@ -71,7 +80,9 @@ class FCMService : FirebaseMessagingService() {
         val nudge = Prefs.Nudge(id = nudgeId, text = text, actions = Prefs.Nudge.parseActions(d["actions"]), at = System.currentTimeMillis(), response = null)
         Prefs.addNudge(this, nudge)
         show(this, nudge)
-        sendBroadcast(Intent(ACTION_NUDGES_CHANGED).setPackage(packageName))
+        sendBroadcast(Intent(ACTION_NUDGE_RECEIVED).setPackage(packageName).apply {
+            putExtra("nudgeId", nudgeId); putExtra("text", text); putExtra("actions", nudge.actionsJson().toString())
+        })
         Log.d(TAG, "nudge $nudgeId shown with ${nudge.actions.size} action(s)")
     }
 

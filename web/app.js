@@ -233,6 +233,8 @@ onPermissions(p => {
 // ======================================================================
 const STATE_WORDS = { open: 'Porchlight on', ask: 'Ask me first', closed: 'Porchlight off' }
 const STRENGTH_WORDS = { steady: 'on', strong: 'strong', fading: 'fading', 'last-call': 'last call' }
+const modeWord = m => ({ open: 'on', ask: 'ask me first', closed: 'off' }[m] || 'your default')
+const clock = iso => { const d = new Date(iso), t = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); return d.toDateString() === new Date().toDateString() ? t : `${t} ${d.toLocaleDateString([], { weekday: 'short' })}` }
 
 function renderHome() {
   const root = $('#s-home'); root.replaceChildren()
@@ -251,8 +253,8 @@ function renderHome() {
   }
   const sub = pl.state === 'open'
     ? (pl.until ? `${fmtMin(pl.remainingMin)} left${pl.strength === 'last-call' ? ' · last call' : pl.strength === 'fading' ? ' · fading' : ''}` : pl.source === 'window' ? 'from your drop-in window' : 'your default')
-    : pl.state === 'ask' ? 'Friends who come by trigger a yes-or-veto nudge to you.'
-      : (pl.until ? `for another ${fmtMin(pl.remainingMin)}` : pl.source === 'default' ? 'your default' : '')
+    : pl.state === 'ask' ? `Friends who come by trigger a yes-or-veto nudge to you.${pl.until ? ` Until ${clock(pl.until)}, then ${modeWord(pl.then)}.` : ''}`
+      : (pl.until ? `until ${clock(pl.until)}, then ${modeWord(pl.then)}` : pl.source === 'default' ? 'your default' : 'until you change it')
   const hero = h('div', { class: 'card hero', 'data-state': pl.state, role: 'button', tabindex: '0', 'aria-label': 'change my porchlight', onclick: openPorchSheet, onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPorchSheet() } } },
     lamp, h('h1', {}, STATE_WORDS[pl.state] || pl.state), h('div', { class: 'sub' }, sub),
     pl.note && h('div', { class: 'note' }, `“${pl.note}”`),
@@ -371,7 +373,8 @@ function openPorchSheet() {
     h('div', { class: 'lbl' }, 'Open for'),
     h('div', { class: 'chips' }, chip('1h', '', () => ({ porchlight: 'open', hours: 1 })), chip('2h', '', () => ({ porchlight: 'open', hours: 2 })), chip('4h', '', () => ({ porchlight: 'open', hours: 4 })), chip('tonight', '', tonight)),
     h('div', { class: 'lbl' }, 'Or'),
-    h('div', { class: 'chips' }, chip('Ask me', 'volt', () => ({ porchlight: 'ask' }), pl.state === 'ask'), chip('Closed', 'dark', () => ({ porchlight: 'closed' }), pl.state === 'closed')),
+    h('div', { class: 'chips' }, chip('Ask me', 'volt', () => ({ porchlight: 'ask' }), pl.state === 'ask'), chip('Closed', 'dark', () => ({ porchlight: 'closed' }), pl.state === 'closed' && !pl.until), chip('Closed for the night', 'dark', () => ({ porchlight: 'closed', until: 'morning' }), pl.state === 'closed' && !!pl.until)),
+    h('p', { class: 'small muted', style: 'margin:0' }, 'Ask me and Closed hold until you change them. For the night ends when your quiet hours do.'),
     h('div', { class: 'lbl' }, 'Note for this time'), note,
     h('div', { class: 'standing small muted' }, dn ? ['Standing note: ', h('i', {}, `“${dn}”`), ' · '] : 'No standing note yet · ', h('button', { class: 'link', onclick: openDefaultNoteSheet }, dn ? 'change' : 'set one')),
     h('div', { class: 'foot' }, h('button', { class: 'btn ghost small', onclick: closeSheet }, 'Cancel')))
@@ -397,7 +400,7 @@ async function setPorch(status, note) {
     await ingest({ status: payload })
     const mins = status.hours ? Math.round(status.hours * 60) : null
     if (mins) ls.set('opportune.porch.total', JSON.stringify({ min: mins, until: null }))
-    closeSheet(); toast(status.porchlight === 'open' ? 'porchlight on' : status.porchlight === 'ask' ? 'they\'ll ask first' : 'porchlight off')
+    closeSheet(); toast(status.porchlight === 'open' ? 'porchlight on' : status.porchlight === 'ask' ? 'they\'ll ask first' : status.until === 'morning' ? 'porchlight off for the night' : 'porchlight off')
     await refresh()
     // remember the full window so the ring can show remaining / total
     if (mins && state.me.porchlight.until) ls.set('opportune.porch.total', JSON.stringify({ min: mins, until: state.me.porchlight.until }))

@@ -39,7 +39,7 @@ test('belief: home from a fresh fix, walking from activity, porchlight from a st
   assert.match(fact(b, 'where').basis, /phone fix just now, near home/)
   assert.equal(fact(b, 'moving').value, 'walking')
   assert.equal(fact(b, 'porchlight').value, 'open')
-  assert.match(fact(b, 'porchlight').basis, /you set it, until \d/)
+  assert.match(fact(b, 'porchlight').basis, /you set it until \d.*, then ask/)
   assert.match(fact(b, 'calendar').value, /^free until Board games at \d/)
   assert.doesNotMatch(JSON.stringify(b), /37\.77|-122\.4/, 'no coordinates in the belief')
 })

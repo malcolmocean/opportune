@@ -32,7 +32,7 @@ export function belief(ctx, person) {
   const light = porchlight(ctx, person)
   facts.push({
     key: 'porchlight', value: light.state,
-    basis: light.source === 'status' ? `you set it${light.until ? `, until ${clock(light.until)}` : ''}` : light.source === 'window' ? 'one of your drop-in windows' : 'your default when nothing else applies',
+    basis: light.source === 'status' ? (light.until ? `you set it until ${clock(light.until)}, then ${light.then || 'your default'}` : 'you set it; it holds until you change it') : light.source === 'window' ? 'one of your drop-in windows' : 'your default when nothing else applies',
   })
 
   // calendar

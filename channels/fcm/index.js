@@ -1,4 +1,5 @@
 import locationPost from '../../sources/locationPost/index.js'
+import { nextLocalHour } from '../../queries/dropin/porchlight.js'
 
 // Native push via Firebase Cloud Messaging. The Android app (apps/android) registers its FCM token by
 // POSTing { fcmToken } to its opportuneApp ingest URL; nudges go out as data messages and the app renders
@@ -67,11 +68,15 @@ export async function handleAppPayload(ctx, person, body, config = {}) {
     else await ctx.nudges.respond(nudgeId, key, body.nudgeResponse.note)
   }
   if (body.status && PORCHLIGHT.has(body.status.porchlight)) {
-    // { porchlight, hours? | until?, note? }  default window PORCHLIGHT_HOURS; 'closed' with no duration lasts till tomorrow morning
-    const hours = Number(body.status.hours) > 0 ? Math.min(Number(body.status.hours), 24) : null
-    const until = body.status.until && !isNaN(Date.parse(body.status.until)) ? new Date(body.status.until).toISOString()
-      : new Date(Date.now() + (hours ?? (body.status.porchlight === 'closed' ? 12 : PORCHLIGHT_HOURS)) * 3600e3).toISOString()
-    out.push({ kind: 'status', at: body.status.at || new Date().toISOString(), until, data: { porchlight: body.status.porchlight, note: body.status.note || null } })
+    // { porchlight, hours? | until? (ISO or 'morning'), note? }. Open is a window: no duration → PORCHLIGHT_HOURS.
+    // Closed and ask are modes: no duration → they hold until the next status. 'morning' ends when quiet hours do.
+    const st = body.status, hours = Number(st.hours) > 0 ? Math.min(Number(st.hours), 24) : null
+    let until = null
+    if (st.until === 'morning') until = nextLocalHour(ctx.people.get(person.id)?.tz ?? person.tz, ctx.people.policy(person.id).quietHours?.end ?? 8).toISOString()
+    else if (st.until && !isNaN(Date.parse(st.until))) until = new Date(st.until).toISOString()
+    else if (hours) until = new Date(Date.now() + hours * 3600e3).toISOString()
+    else if (st.porchlight === 'open') until = new Date(Date.now() + PORCHLIGHT_HOURS * 3600e3).toISOString()
+    out.push({ kind: 'status', at: st.at || new Date().toISOString(), until, data: { porchlight: st.porchlight, note: st.note || null } })
   }
   if (body.home && Number.isFinite(body.home.lat) && Number.isFinite(body.home.lng)) {
     ctx.db.run(`delete from places where owner_id = ? and name = 'home'`, person.id)

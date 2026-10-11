@@ -93,7 +93,7 @@ app.get('/api/app/state', async (req, res) => {
   res.json({ me: { id: me.id, name: me.display_name, hasHome: !!myPres.home, atHome: myPres.isHome, onboarding: me.onboarding?.step || null,
       story: me.story || '', defaultNote: me.dropin_note || '',   // ingest { story } / { defaultNote } to set; porchlight.note below is the resolved one (status note, else defaultNote)
       belief: belief(ctx, me),   // { facts: [{ key, value, basis }], at }: what the node thinks is going on, for the home screen's "wrong" buttons
-      porchlight: { state: mine.state, source: mine.source, until: mine.until || null, remainingMin: remaining(mine), strength: strength(mine), note: mine.note || null } },
+      porchlight: { state: mine.state, source: mine.source, until: mine.until || null, then: mine.then || null, remainingMin: remaining(mine), strength: strength(mine), note: mine.note || null } },
     friends, nudges: ctx.nudges.recent(me.id, 20), now: new Date().toISOString() })
 })
 

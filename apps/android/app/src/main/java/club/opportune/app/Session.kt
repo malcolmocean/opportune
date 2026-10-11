@@ -1,4 +1,4 @@
-package com.malcolmocean.opportune
+package club.opportune.app
 
 import android.app.NotificationManager
 import android.content.Context

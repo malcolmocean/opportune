@@ -12,11 +12,11 @@ if (file("google-services.json").exists()) {
 }
 
 android {
-    namespace = "com.malcolmocean.opportune"
+    namespace = "club.opportune.app"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.malcolmocean.opportune"
+        applicationId = "club.opportune.app"
         minSdk = 26
         targetSdk = 34
         versionCode = 2

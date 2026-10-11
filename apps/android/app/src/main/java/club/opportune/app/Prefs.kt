@@ -1,4 +1,4 @@
-package com.malcolmocean.opportune
+package club.opportune.app
 
 import android.content.Context
 import android.content.SharedPreferences

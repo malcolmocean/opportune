@@ -1,4 +1,4 @@
-package com.malcolmocean.opportune
+package club.opportune.app
 
 import android.Manifest
 import android.content.Context

@@ -1,4 +1,4 @@
-package com.malcolmocean.opportune
+package club.opportune.app
 
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -15,7 +15,7 @@ import kotlinx.coroutines.launch
 class NotificationActionReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "NudgeAction"
-        const val ACTION_RESPOND = "com.malcolmocean.opportune.RESPOND"
+        const val ACTION_RESPOND = "club.opportune.app.RESPOND"
         const val EXTRA_NUDGE_ID = "nudgeId"
         const val EXTRA_KEY = "key"
         const val EXTRA_NOTIFICATION_ID = "notificationId"

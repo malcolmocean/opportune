@@ -1,4 +1,4 @@
-package com.malcolmocean.opportune
+package club.opportune.app
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -27,9 +27,9 @@ class FCMService : FirebaseMessagingService() {
         private const val TAG = "FCMService"
         const val NUDGE_CHANNEL_ID = "nudges"
         /** A nudge just arrived; extras: nudgeId, text, actions (JSON string). */
-        const val ACTION_NUDGE_RECEIVED = "com.malcolmocean.opportune.NUDGE_RECEIVED"
+        const val ACTION_NUDGE_RECEIVED = "club.opportune.app.NUDGE_RECEIVED"
         /** A nudge was answered natively (notification button); the web app should refresh. */
-        const val ACTION_NUDGES_CHANGED = "com.malcolmocean.opportune.NUDGES_CHANGED"
+        const val ACTION_NUDGES_CHANGED = "club.opportune.app.NUDGES_CHANGED"
         const val EXTRA_OPEN_NUDGES = "openNudges"
         private const val MAX_BUTTONS = 3
 

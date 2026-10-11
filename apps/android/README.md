@@ -16,7 +16,7 @@ A thin shell around the web app. Everything a person sees is `GET /app` on their
 
 The contract between the page and the shell is **`docs/APP-BRIDGE.md`**. Read that first.
 
-Package: `com.malcolmocean.opportune`. minSdk 26, target/compile 34. Kotlin, AGP 8.2, Gradle 8.2.
+Package: `club.opportune.app`. minSdk 26, target/compile 34. Kotlin, AGP 8.2, Gradle 8.2.
 
 ## How the shell works
 
@@ -67,7 +67,7 @@ Details worth knowing on the web side:
 
 1. [console.firebase.google.com](https://console.firebase.google.com) → **Add project** (any name, e.g. `opportune`).
    Analytics off is fine.
-2. In the project: **Add app** → Android. Package name **`com.malcolmocean.opportune`**. Nickname optional.
+2. In the project: **Add app** → Android. Package name **`club.opportune.app`**. Nickname optional.
    No SHA-1 needed (we don't use Google Sign-In).
 3. **Download `google-services.json`** and put it at **`apps/android/app/google-services.json`**.
    (It's gitignored. Without it the app still builds and does location, but push stays off.)

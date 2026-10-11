@@ -1,4 +1,4 @@
-package com.malcolmocean.opportune
+package club.opportune.app
 
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -11,7 +11,7 @@ import com.google.android.gms.location.DetectedActivity
 class ActivityReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "ActivityReceiver"
-        const val ACTION = "com.malcolmocean.opportune.ACTIVITY"
+        const val ACTION = "club.opportune.app.ACTIVITY"
         private const val STALE_MS = 20 * 60 * 1000L
 
         @Volatile private var state: String? = null

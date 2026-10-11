@@ -33,7 +33,9 @@ test('coAttendance: same url on two calendars', async () => {
   await ctx.observations.ingest(eileen.id, 'ics', [{ kind: 'event', at, dedupeKey: 'a', data: { title: 'Party', url: 'https://partiful.com/e/x' } }])
   await ctx.observations.ingest(jess.id, 'ics', [{ kind: 'event', at, dedupeKey: 'b', data: { title: 'Party', url: 'https://partiful.com/e/x' } }])
   const opp = ctx.db.get(`select * from opportunities where kind = 'coAttendance'`)
-  assert.ok(opp); assert.equal(opp.primary_id, jess.id)
+  assert.ok(opp); assert.equal(opp.primary_id, null, 'both on the system: tell both, the Judge decides each')
+  await new Promise(r => setTimeout(r, 20))
+  assert.equal(ctx.db.all(`select * from decisions where opportunity_id = ?`, opp.id).length, 2)
 })
 
 test('judge gate: no wantMore either side → suppress, logged', async () => {

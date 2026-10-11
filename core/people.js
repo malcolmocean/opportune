@@ -71,6 +71,16 @@ export function makePeople(db, env, events) {
         : phone ? db.get('select name from contacts where owner_id = ? and kind = ? and value = ?', ownerId, 'phone', normPhone(phone)) : null
       return r?.name || null
     },
+    // the owner's contacts that match an email (exact, normalized) or a name (case/whitespace-insensitive) → [{ name, kind, value }]
+    contactsMatching(ownerId, { email, name } = {}) {
+      const out = [], seen = new Set()
+      const push = r => { const k = `${r.kind}:${r.value}`; if (!seen.has(k)) { seen.add(k); out.push({ name: r.name || null, kind: r.kind, value: r.value }) } }
+      const e = normEmail(email)
+      if (e) for (const r of db.all('select name, kind, value from contacts where owner_id = ? and kind = ? and value = ?', ownerId, 'email', e)) push(r)
+      const n = normName(name)
+      if (n) for (const r of db.all('select name, kind, value from contacts where owner_id = ? and name is not null', ownerId)) if (normName(r.name) === n) push(r)
+      return out
+    },
     // who has this email/phone in their contacts? → [{ ownerId, name }]
     ownersWithContact(kind, value) {
       const v = kind === 'email' ? normEmail(value) : normPhone(value)
@@ -90,12 +100,15 @@ export function makePeople(db, env, events) {
                      from relationships r join people p on p.id = r.to_id where r.from_id = ?`, personId)
         .map(r => parseRow(r, ['policy', 'onboarding', 'grants', 'via']))
     },
+    // patch keys outside REL_COLUMNS (e.g. from an LLM tool call) are ignored, never interpolated into SQL.
     setRel(fromId, toId, patch = {}) {
       const ex = db.get('select 1 from relationships where from_id = ? and to_id = ?', fromId, toId)
-      if (!ex) db.insert('relationships', { from_id: fromId, to_id: toId, tier: patch.tier || 'friend', want_more: patch.wantMore ? 1 : 0, travel: patch.travel ?? 1, note: patch.note || '', grants: patch.grants || {}, via: patch.via || {}, vouch: patch.vouch ? 1 : 0, created_at: now() })
+      const wantMore = patch.wantMore ?? patch.want_more
+      if (!ex) db.insert('relationships', { from_id: fromId, to_id: toId, tier: patch.tier || 'friend', want_more: wantMore ? 1 : 0, travel: patch.travel ?? 1, note: patch.note || '', grants: patch.grants || {}, via: patch.via || {}, vouch: patch.vouch ? 1 : 0, created_at: now() })
       else for (const [k, v] of Object.entries(patch)) {
-        const col = { wantMore: 'want_more' }[k] || k
-        db.run(`update relationships set ${col} = ? where from_id = ? and to_id = ?`, typeof v === 'boolean' ? (v ? 1 : 0) : typeof v === 'object' ? JSON.stringify(v) : v, fromId, toId)
+        const col = REL_COLUMNS[k]
+        if (!col || v === undefined) continue
+        db.run(`update relationships set ${col} = ? where from_id = ? and to_id = ?`, typeof v === 'boolean' ? (v ? 1 : 0) : v !== null && typeof v === 'object' ? JSON.stringify(v) : v, fromId, toId)
       }
       return P.rel(fromId, toId)
     },
@@ -123,7 +136,12 @@ export function makePeople(db, env, events) {
 
     // places
     places(ownerId) { return db.all('select * from places where owner_id = ? or shared = 1', ownerId) },
-    home(ownerId) { return db.get(`select * from places where owner_id = ? and name = 'home' order by created_at desc limit 1`, ownerId) || null },
+    // the declared home: people.home_place_id first (set by addPlace), else the newest place named 'home'
+    home(ownerId) {
+      const hid = db.get('select home_place_id from people where id = ?', ownerId)?.home_place_id
+      const byId = hid && db.get('select * from places where id = ? and owner_id = ?', hid, ownerId)
+      return byId || db.get(`select * from places where owner_id = ? and name = 'home' order by created_at desc limit 1`, ownerId) || null
+    },
     // friends in either direction: [{ ...person, outgoing: rel|null, incoming: rel|null }]
     connections(personId) {
       const ids = new Set([...db.all('select to_id id from relationships where from_id = ?', personId), ...db.all('select from_id id from relationships where to_id = ?', personId)].map(r => r.id))
@@ -131,13 +149,19 @@ export function makePeople(db, env, events) {
     },
     addPlace(ownerId, { name, lat, lng, radiusM = 150, shared = false }) {
       const row = { id: uid(), owner_id: ownerId, name, lat, lng, radius_m: radiusM, shared: shared ? 1 : 0, created_at: now() }
-      db.insert('places', row); return row
+      db.insert('places', row)
+      if (name === 'home') db.run('update people set home_place_id = ? where id = ?', row.id, ownerId)
+      return row
     },
   }
   return P
 }
 
+// relationship columns a caller may update through setRel (key → column)
+const REL_COLUMNS = { tier: 'tier', wantMore: 'want_more', want_more: 'want_more', travel: 'travel', note: 'note', grants: 'grants', via: 'via', vouch: 'vouch' }
+
 export const normEmail = e => (e || '').trim().toLowerCase() || null
+export const normName = s => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ') || null
 export const normPhone = p => { const d = (p || '').replace(/[^\d+]/g, ''); if (!d) return null; const digits = d.replace(/\D/g, ''); return digits.length === 10 ? '+1' + digits : (d.startsWith('+') ? '+' : '+') + digits }
 
 function genKeys() {

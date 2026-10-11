@@ -210,7 +210,7 @@ function renderPerms() {
   root.append(h('div', { class: 'card perm' }, lamp,
     h('h1', {}, 'Let it see where you are'),
     h('p', {}, 'Location is how opportune notices you\'re a block from a friend whose porchlight is on. It stays on your node; friends see "home" or "a block away", never a pin.'),
-    h('button', { class: 'btn', onclick: () => { bridge.requestLocation(); toast('answer the Android prompt') } }, 'Allow location'),
+    h('button', { class: 'btn', onclick: () => { bridge.requestLocation(); toast('answer the system prompt') } }, 'Allow location'),
     h('button', { class: 'btn ghost', onclick: () => show('home') }, 'Not now')))
   $('#tabbar').hidden = true
   show('perms')
@@ -251,7 +251,7 @@ function renderHome() {
     lamp, h('h1', {}, STATE_WORDS[pl.state] || pl.state), h('div', { class: 'sub' }, sub),
     pl.note && h('div', { class: 'note' }, `“${pl.note}”`),
     h('div', { class: 'hint' }, 'tap to change'))
-  root.append(hero)
+  root.append(hero, beliefCard())
 
   // sources progress, until everything is connected or declined (then it lives in Settings only)
   if (manage) { const { done, total } = sourceModel(); if (done < total) root.append(progressCard()) }
@@ -259,7 +259,7 @@ function renderHome() {
   if (isNative && !perms?.notifications) {
     root.append(h('div', { class: 'card' }, h('h3', {}, 'Let nudges reach you'),
       h('p', { class: 'muted' }, 'A nudge is a notification with yes and veto buttons. Without it the app can only tell you when you open it.'),
-      h('button', { class: 'btn volt', onclick: () => { bridge.requestNotifications(); toast(perms?.notifications === false ? 'turn notifications on in the settings page' : 'answer the Android prompt') } }, perms?.notifications === false ? 'Open notification settings' : 'Allow notifications')))
+      h('button', { class: 'btn volt', onclick: () => { bridge.requestNotifications(); toast(perms?.notifications === false ? 'turn notifications on in the settings page' : 'answer the system prompt') } }, perms?.notifications === false ? 'Open notification settings' : 'Allow notifications')))
   }
   if (!me.hasHome) root.append(homeCard())
   else if (!me.atHome && pl.state === 'open') {
@@ -272,6 +272,48 @@ function renderHome() {
   for (const f of state.friends) root.append(friendCard(f))
 }
 
+// "What I think is going on": one row per fact of state.me.belief, each with a quiet "wrong" button that files a
+// correction (POST /api/app/corrections; they show up on the Review screen). A fact whose basis says a source is
+// missing gets a link to the fix instead. This card is for auditing the node's picture of you, not a hero.
+const corrected = new Map()   // key → the believed value the person disputed; the "corrected" tag stays while the belief still says that
+const FACT_LABEL = { where: 'where', moving: 'moving', porchlight: 'porchlight', calendar: 'calendar' }
+function beliefCard() {
+  const b = state.me.belief
+  if (!b?.facts?.length) return null
+  const fix = f => {
+    if (f.key === 'calendar' && f.value === 'no calendar connected') return ['connect', () => show('sources')]
+    if (f.key === 'where' && f.value === 'no home set') return ['set home', () => { const c = $('#s-home .home-card'); c ? c.scrollIntoView({ block: 'center', behavior: 'smooth' }) : show('settings') }]
+    if (f.key === 'where' && f.basis === 'no location from your phone yet') return ['allow location', () => show('settings')]
+    return null
+  }
+  const card = h('div', { class: 'card belief' }, h('h3', {}, 'What I think is going on'))
+  for (const f of b.facts) {
+    if (corrected.has(f.key) && corrected.get(f.key) !== f.value) corrected.delete(f.key)   // the belief moved on
+    const fx = fix(f)
+    const right = fx ? h('button', { class: 'link small', onclick: fx[1] }, fx[0])
+      : corrected.has(f.key) ? h('span', { class: 'tag' }, 'corrected')
+        : h('button', { class: 'wrong', 'aria-label': `${FACT_LABEL[f.key] || f.key}: that's wrong`, onclick: () => openWrongSheet(f) }, 'wrong')
+    card.append(h('div', { class: 'fact', 'data-key': f.key }, h('span', { class: 'k' }, FACT_LABEL[f.key] || f.key),
+      h('div', { class: 'v' }, h('b', {}, f.value), h('span', { class: 'basis' }, f.basis)), right))
+  }
+  return card
+}
+function openWrongSheet(f) {
+  const ta = h('textarea', { rows: 2, maxlength: 500, placeholder: 'optional: what is actually going on' })
+  const btn = h('button', { class: 'btn block', onclick: async () => {
+    btn.disabled = true
+    try {
+      const actually = ta.value.trim()
+      await req('/api/app/corrections', { method: 'POST', body: { key: f.key, believed: f.value, actually: actually || undefined } })
+      corrected.set(f.key, f.value); closeSheet(); toast('noted'); renderHome()
+    } catch (e) { fail(e); btn.disabled = false }
+  } }, 'Send')
+  openSheet(h('h3', {}, 'What\'s actually going on?'), h('p', { class: 'small muted', style: 'margin:0' }, `It thinks ${FACT_LABEL[f.key] || f.key} is `, h('b', {}, f.value), ` (${f.basis}).`),
+    h('div', { class: 'lbl' }, 'Actually'), ta, h('p', { class: 'small muted', style: 'margin:8px 0 12px' }, 'Corrections land under Review, so you can see what it keeps getting wrong.'), btn,
+    h('div', { class: 'foot' }, h('button', { class: 'btn ghost small', onclick: closeSheet }, 'Cancel')))
+  setTimeout(() => ta.focus(), 50)
+}
+
 function friendCard(f) {
   const pl = f.porchlight
   const stateLine = pl.state === 'open'
@@ -282,7 +324,7 @@ function friendCard(f) {
   const card = h('div', { class: 'card friend', 'data-state': pl.state, 'data-id': f.id },
     lanternEl(pl.state, { strength: pl.strength, size: 52 }),
     h('div', {}, h('div', { class: 'name' }, h('span', { style: 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, f.name), f.wantMore && h('span', { class: 'star', title: 'you want to see more of them' }, '★'), f.theyWantMore && !f.wantMore && h('span', { class: 'small muted' }, 'wants more of you')),
-      h('div', { class: 'state' }, stateLine), where && h('div', { class: 'where' }, where), pl.note && h('div', { class: 'note' }, `“${pl.note}”`)))
+      h('div', { class: 'state' }, stateLine), where && h('div', { class: 'where' }, where), pl.note && h('div', { class: 'note' }, `“${pl.note}”`), f.story && storyEl(f.story)))
   if (pl.state === 'open') {
     const act = h('div', { class: 'act' })
     const btn = h('button', { class: 'btn small', onclick: async () => {
@@ -298,13 +340,21 @@ function friendCard(f) {
   }
   return card
 }
+// A friend's story (what they're generally up for and when), clamped to two lines with a "more" toggle when longer.
+function storyEl(text) {
+  const el = h('div', { class: 'story' }, text)
+  if (text.length <= 110 && !text.includes('\n')) return el
+  const more = h('button', { class: 'link small more', onclick: () => { const open = el.classList.toggle('open'); more.textContent = open ? 'less' : 'more' } }, 'more')
+  return h('div', {}, el, more)
+}
 const answerWords = (a, f) => ({ yes: 'Come on by', likely: 'Probably fine, they\'re being asked', unlikely: 'Not a great moment', no: 'Not now', unsupported: 'Their agent can\'t say' }[a.answer] || a.answer)
 
 // Set / change my porchlight. POSTs { status } to the ingest URL; the server picks the window.
 function openPorchSheet() {
-  const pl = state.me.porchlight
-  const note = h('input', { type: 'text', placeholder: 'note for friends: “come by the back”', maxlength: 140 })
-  note.value = pl.note || ''
+  const pl = state.me.porchlight, dn = state.me.defaultNote || ''
+  // a note typed here is for this status only; blank keeps the standing note (shown as the placeholder)
+  const note = h('input', { type: 'text', placeholder: dn || 'e.g. “come by the back”', maxlength: 140, 'aria-label': 'note for this time' })
+  note.value = pl.source === 'status' && pl.note && pl.note !== dn ? pl.note : ''
   const chip = (label, cls, status, on) => h('button', { class: `chip ${cls}${on ? ' on' : ''}`, onclick: () => setPorch(status(), note.value.trim()) }, label)
   const tonight = () => {
     const d = new Date(); const until = new Date(d); until.setHours(23, 30, 0, 0)
@@ -316,12 +366,27 @@ function openPorchSheet() {
     h('div', { class: 'chips' }, chip('1h', '', () => ({ porchlight: 'open', hours: 1 })), chip('2h', '', () => ({ porchlight: 'open', hours: 2 })), chip('4h', '', () => ({ porchlight: 'open', hours: 4 })), chip('tonight', '', tonight)),
     h('div', { class: 'lbl' }, 'Or'),
     h('div', { class: 'chips' }, chip('Ask me', 'volt', () => ({ porchlight: 'ask' }), pl.state === 'ask'), chip('Closed', 'dark', () => ({ porchlight: 'closed' }), pl.state === 'closed')),
-    h('div', { class: 'lbl' }, 'Note'), note,
+    h('div', { class: 'lbl' }, 'Note for this time'), note,
+    h('div', { class: 'standing small muted' }, dn ? ['Standing note: ', h('i', {}, `“${dn}”`), ' · '] : 'No standing note yet · ', h('button', { class: 'link', onclick: openDefaultNoteSheet }, dn ? 'change' : 'set one')),
     h('div', { class: 'foot' }, h('button', { class: 'btn ghost small', onclick: closeSheet }, 'Cancel')))
+}
+// The standing drop-in note: shown with the porchlight whenever a status has no note of its own (never under a closed one).
+function openDefaultNoteSheet() {
+  const dn = state.me.defaultNote || ''
+  const inp = h('input', { type: 'text', placeholder: '“come round the back, door\'s open”', maxlength: 500, 'aria-label': 'standing note' })
+  inp.value = dn
+  const save = async v => {
+    try { await ingest({ defaultNote: v }); toast(v ? 'standing note saved' : 'standing note cleared'); await refresh(); openPorchSheet() } catch (e) { fail(e) }
+  }
+  openSheet(h('h3', {}, 'Standing note'), h('p', { class: 'small muted', style: 'margin:0' }, 'Friends see this with your porchlight unless you give a status its own note. It stays after one-time notes expire.'),
+    h('div', { class: 'lbl' }, 'Note'), inp,
+    h('div', { class: 'foot', style: 'gap:8px' }, dn && h('button', { class: 'btn ghost small', onclick: () => save('') }, 'Clear'), h('button', { class: 'btn ghost small', onclick: openPorchSheet }, 'Back'), h('button', { class: 'btn small', onclick: () => save(inp.value.trim()) }, 'Save')))
+  setTimeout(() => inp.focus(), 50)
 }
 async function setPorch(status, note) {
   try {
-    const payload = { porchlight: status.porchlight, note: note || undefined }
+    const payload = { porchlight: status.porchlight }
+    if (note) payload.note = note   // only when typed: blank keeps the standing note
     if (status.until) payload.until = status.until; else if (status.hours) payload.hours = status.hours
     await ingest({ status: payload })
     const mins = status.hours ? Math.round(status.hours * 60) : null
@@ -353,7 +418,7 @@ function homeCard() {
   }
   if (perms?.location) locate()
   else { btn.textContent = 'Use my location'; btn.disabled = false; btn.onclick = () => { locate() } }
-  return h('div', { class: 'card' }, h('h3', {}, 'Where\'s home?'), sub, btn)
+  return h('div', { class: 'card home-card' }, h('h3', {}, 'Where\'s home?'), sub, btn)
 }
 async function reverseGeocode({ lat, lng }) {
   const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&lat=${lat}&lon=${lng}`, { headers: { accept: 'application/json' } })
@@ -414,13 +479,25 @@ onNudge(n => {
 let quietOnly = false
 function renderReview() {
   const root = $('#s-review'); root.replaceChildren()
-  root.append(head('The judge\'s calls', ['Nudges', 'nudges']))
+  root.append(head('The judge\'s calls', ['Nudges', 'nudges']), correctionsBox())
   const cb = h('input', { type: 'checkbox', id: 'quietOnly', onchange: e => { quietOnly = e.target.checked; renderReview() } })
   cb.checked = quietOnly
   root.append(h('label', { class: 'filter' }, cb, 'only the quiet ones (things it decided not to tell me)'))
   const list = manage.decisions.filter(d => !quietOnly || d.verdict === 'suppress')
   if (!list.length) return root.append(h('div', { class: 'card empty' }, manage.decisions.length ? 'Nothing quiet lately.' : 'No judgement calls yet. They show up here, including the ones it keeps to itself.'))
   for (const d of list) root.append(decisionCard(d))
+}
+// What you told it was wrong (the belief card's "wrong" buttons): GET /api/app/corrections, newest first. Hidden when empty.
+function correctionsBox() {
+  const box = h('div', { class: 'card corrections' })
+  box.hidden = true
+  req('/api/app/corrections').then(list => {
+    if (!list.length) return
+    box.append(h('h3', {}, 'You corrected'))
+    for (const c of list) box.append(h('div', { class: 'c' }, h('span', { class: 'k' }, FACT_LABEL[c.key] || c.key), h('span', {}, h('b', {}, c.believed || '(blank)'), ' → ', c.actually ? h('b', {}, c.actually) : h('span', { class: 'muted' }, 'wrong, no detail')), h('span', { class: 'when' }, when(c.at))))
+    box.hidden = false
+  }).catch(() => {})
+  return box
 }
 function decisionCard(d) {
   const card = h('div', { class: 'card decision' })
@@ -764,13 +841,14 @@ async function renderSettings() {
     row(me.displayName || '(unnamed)', null),
     row('Email', me.email ? 'for sign-in links on a new device' : 'so you can sign in on another device', me.email ? h('span', { class: 'small muted' }, me.email) : emailForm()),
     row('Timezone', 'from this device; quiet hours and digests follow it', h('span', { class: 'small muted' }, me.tz)),
+    storyRow(),
     row('Node', null, h('code', {}, new URL(me.nodeUrl || location.origin).host))))
 
   // permissions
   const permCard = h('div', { class: 'card' })
   if (isNative) {
     const p = perms || {}
-    const ask = (label, fn) => h('button', { class: 'btn small ghost', onclick: () => { fn(); toast('answer the Android prompt') } }, label)
+    const ask = (label, fn) => h('button', { class: 'btn small ghost', onclick: () => { fn(); toast('answer the system prompt') } }, label)
     // notifications === false also covers "turned off in system settings"; requestNotifications() then opens that page
     const notif = p.notifications ? status(true) : h('span', { style: 'display:flex;align-items:center;gap:8px' }, h('span', { class: 'small muted' }, h('i', { class: 'dot off' }), 'off'), ask(p.notifications === false ? 'Open settings' : 'Allow', bridge.requestNotifications))
     permCard.append(
@@ -781,7 +859,7 @@ async function renderSettings() {
       row('Share contacts', `names on guest lists get recognised. ${session.contactsSynced ? `${session.contactsSynced} synced.` : 'Synced daily, stays on your node.'}`,
         h('button', { class: 'toggle', role: 'switch', 'aria-checked': String(!!p.contacts), 'aria-label': 'share contacts', onclick: () => {
           if (p.contacts) { bridge.stopContacts(); toast('contacts sharing off'); perms = { ...p, contacts: false }; renderSettings() }
-          else { bridge.requestContacts(); toast('answer the Android prompt') }
+          else { bridge.requestContacts(); toast('answer the system prompt') }
         } }), 'people'),
       row('Push', null, status(session.pushBound, 'registered', 'waiting for the app to register'), 'push'))
   } else {
@@ -817,6 +895,26 @@ async function renderSettings() {
   // sign out
   root.append(h('div', { class: 'card', style: 'margin-top:20px' },
     row('Sign out', isNative ? 'forgets this sign-in and stops sharing location from this phone' : 'forgets the token in this browser', h('button', { class: 'btn small ghost', onclick: signOut }, 'Sign out'))))
+}
+// Settings → You → "What you're generally up for": state.me.story, plain text friends and agents read. ingest({ story }); '' clears.
+const STORY_HINT = 'Usually free weeknights after 8, love a walk, hate phone calls…'
+function storyRow() {
+  const story = state?.me?.story || ''
+  const sub = h('span', { class: story ? 'story' : 'story muted' }, story || STORY_HINT)
+  return h('div', { class: 'row', role: 'button', tabindex: '0', style: 'cursor:pointer', onclick: openStorySheet, onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openStorySheet() } } },
+    h('div', { class: 'lbl' }, h('b', {}, 'What you\'re generally up for'), sub), h('span', { class: 'arrow muted' }, '›'))
+}
+function openStorySheet() {
+  const ta = h('textarea', { rows: 5, maxlength: 2000, placeholder: STORY_HINT, 'aria-label': 'what you\'re generally up for' })
+  ta.value = state?.me?.story || ''
+  const btn = h('button', { class: 'btn block', onclick: async () => {
+    btn.disabled = true
+    try { await ingest({ story: ta.value.trim() }); closeSheet(); toast('saved'); await refresh(); if (current === 'settings') renderSettings() } catch (e) { fail(e); btn.disabled = false }
+  } }, 'Save')
+  openSheet(h('h3', {}, 'What you\'re generally up for'), h('p', { class: 'small muted', style: 'margin:0' }, 'Plain text, in your words: when you\'re usually free, what you\'re up for, what you\'d rather not. Friends can read it, and your agent weighs it.'),
+    h('div', { class: 'lbl' }, 'Your story'), ta, btn,
+    h('div', { class: 'foot' }, h('button', { class: 'btn ghost small', onclick: closeSheet }, 'Cancel')))
+  setTimeout(() => ta.focus(), 50)
 }
 // Settings → You → Email: POST /api/app/email { email } sends a verification link; the address shows once it's confirmed.
 function emailForm() {

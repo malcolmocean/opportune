@@ -207,8 +207,8 @@ const authorEl = document.getElementById('author')
 try { authorEl.value = localStorage.getItem('flow:author') || '' } catch {}
 authorEl.addEventListener('input', () => { try { localStorage.setItem('flow:author', authorEl.value) } catch {} })
 let comments = [], online = false
-const adminToken = new URLSearchParams(location.search).get('token')
-const hdrs = extra => ({ ...(adminToken ? { 'x-admin-token': adminToken } : {}), ...(extra || {}) })
+const commentToken = new URLSearchParams(location.search).get('token') || 'commentplz'   // shared, low-stakes; override with ?token=
+const hdrs = extra => ({ 'x-comment-token': commentToken, ...(extra || {}) })
 const localLoad = () => { try { return JSON.parse(localStorage.getItem('flow:comments') || '[]') } catch { return [] } }
 const localSave = () => { try { localStorage.setItem('flow:comments', JSON.stringify(comments)) } catch {} }
 async function load() {

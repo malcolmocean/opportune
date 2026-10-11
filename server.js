@@ -100,15 +100,17 @@ app.post('/app/claim', async (req, res) => {
 const dev = (req, res, next) => (devOk(ctx, req) ? next() : res.status(401).json({ error: 'admin token required' }))
 
 // inline comments for the onboarding flow page (site/onboarding.html); kv-backed. The page forwards ?token= as x-admin-token.
-app.get('/api/flow-comments', dev, (_req, res) => res.json(ctx.db.kvGet('flowComments') || []))
-app.post('/api/flow-comments', dev, (req, res) => {
+// flow-page comments use a shared low-stakes word (COMMENT_TOKEN, default "commentplz"), not the admin token
+const commentOk = (req, res, next) => (req.get('x-comment-token') || req.query.ctoken) === (process.env.COMMENT_TOKEN || 'commentplz') ? next() : res.status(401).json({ error: 'comment token required' })
+app.get('/api/flow-comments', commentOk, (_req, res) => res.json(ctx.db.kvGet('flowComments') || []))
+app.post('/api/flow-comments', commentOk, (req, res) => {
   const list = ctx.db.kvGet('flowComments') || []
   const { node, text, author } = req.body || {}
   if (!node || !text) return res.status(400).json({ error: 'node and text required' })
   const c = { id: Date.now().toString(36), node, text: String(text).slice(0, 2000), author: String(author || 'anon').slice(0, 40), at: new Date().toISOString() }
   list.push(c); ctx.db.kvSet('flowComments', list); res.json(c)
 })
-app.delete('/api/flow-comments/:id', dev, (req, res) => { ctx.db.kvSet('flowComments', (ctx.db.kvGet('flowComments') || []).filter(c => c.id !== req.params.id)); res.json({ ok: true }) })
+app.delete('/api/flow-comments/:id', commentOk, (req, res) => { ctx.db.kvSet('flowComments', (ctx.db.kvGet('flowComments') || []).filter(c => c.id !== req.params.id)); res.json({ ok: true }) })
 
 // ---- invites land here; hand off to a channel's onboarding ----
 app.get('/i/:code', (req, res) => {

@@ -74,6 +74,8 @@ class FCMService : FirebaseMessagingService() {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     override fun onMessageReceived(msg: RemoteMessage) {
+        // Signed out but the node still has our old token on file: nothing to answer with, show nothing.
+        if (!Prefs.isConfigured(this)) { Log.w(TAG, "push while signed out; ignored"); return }
         val d = msg.data
         val nudgeId = d["nudgeId"] ?: run { Log.w(TAG, "message without nudgeId: $d"); return }
         val text = d["text"] ?: msg.notification?.body ?: return
@@ -88,6 +90,7 @@ class FCMService : FirebaseMessagingService() {
 
     override fun onNewToken(token: String) {
         Log.d(TAG, "new FCM token")
+        if (!Prefs.isConfigured(this)) return   // registered on the next setIngestUrl instead
         scope.launch { ApiClient.registerToken(this@FCMService, token) }
     }
 

@@ -36,6 +36,21 @@ object Prefs {
     fun isConfigured(c: Context) = parseIngestUrl(ingestUrl(c)) != null
     fun token(c: Context): String? = parseIngestUrl(ingestUrl(c))?.token
 
+    /**
+     * Forget everything that ties this install to a person: the ingest URL (the credential), the FCM
+     * registration memory, the contacts switch and its sync markers, the post markers and the cached
+     * nudges. The node override survives, it's config, not identity. Use Session.signOut, which also
+     * stops the services; this only wipes storage.
+     */
+    fun clearSession(c: Context) {
+        sp(c).edit()
+            .remove(KEY_URL).remove(KEY_FCM_REGISTERED)
+            .remove(KEY_CONTACTS).remove(KEY_CONTACTS_SYNC).remove(KEY_CONTACTS_COUNT)
+            .remove(KEY_LAST_POST).remove(KEY_LAST_POST_OK)
+            .remove(KEY_NUDGES)
+            .apply()
+    }
+
     /** Explicit override (fallback screen) > base of the ingest URL > DEFAULT_NODE_URL. No trailing slash. */
     fun nodeUrl(c: Context): String {
         val override = sp(c).getString(KEY_NODE_URL, null)?.takeIf { it.isNotBlank() }

@@ -18,6 +18,10 @@ buttons, contacts, and keeping the token.
 
 The **token** is the tail of `ingestUrl` (`/ingest/opportuneApp/<token>`). It is the one
 credential; the web app keeps it in localStorage and the shell keeps it in SharedPreferences.
+Each side forgets it on its own sign-out: the web app clears localStorage and calls
+`signOut()`; the shell also forgets it by itself when the node answers a location post with
+401 (token revoked) or 404 (source removed), so a dead token never keeps the location service
+alive. Nothing runs or posts in the shell without an ingest URL.
 
 ## Bridge: `window.opportuneNative` (present only inside the shell)
 
@@ -27,6 +31,7 @@ Injected by the Android WebView via `addJavascriptInterface`. All methods synchr
 opportuneNative.getNodeUrl()            → string            // e.g. https://opportune.club
 opportuneNative.getIngestUrl()          → string | ''       // '' until onboarding sets it
 opportuneNative.setIngestUrl(url)       → void              // web calls this right after register/claim; shell starts services
+opportuneNative.signOut()               → void              // web calls this on sign-out; shell forgets the URL, stops location + push, drops queued points
 opportuneNative.getPermissions()        → JSON string { notifications, location, backgroundLocation, activity, contacts } (booleans)
 opportuneNative.requestLocation()       → void              // runs the permission chain; result arrives via onPermissions
 opportuneNative.requestNotifications()  → void

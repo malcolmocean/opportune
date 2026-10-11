@@ -42,6 +42,12 @@ Details worth knowing on the web side:
 
 - `setIngestUrl(url)` is a no-op (logged) if the URL isn't `…/ingest/<source>/<token>`. On success it persists, starts
   `LocationService` (only if location is already granted; call `requestLocation()` next) and registers the FCM token.
+- `signOut()` (`Session.signOut`) is the inverse: clears the ingest URL, the FCM-registered-token memory, the contacts
+  switch and sync markers, the post markers and cached nudges (the node override stays); stops `LocationService`
+  (which drops its queued points and its location / activity-recognition registrations); cancels all notifications;
+  deletes the FCM token so the node can't push to this phone any more. Then emits `onNativePermissions` (`contacts`
+  reads false). The OS permissions stay granted. The shell does not touch the WebView's localStorage: the web app
+  clears its own.
 - `requestLocation()` runs the chain fine/coarse → background (with a rationale dialog) → activity recognition, then
   starts the service and emits `onNativePermissions`. A hard denial shows a dialog pointing at Settings.
 - `requestNotifications()` prompts on Android 13+; if notifications are blocked in settings it opens the app's
@@ -122,8 +128,15 @@ Push payload it expects (data message): `{ nudgeId, text, actions: '[{"key","lab
 
 ## Notes
 
-- A reboot or app update restarts the location service (`BootReceiver`) if the ingest URL is set.
+- A reboot or app update restarts the location service (`BootReceiver`) if the ingest URL is set. Nothing starts
+  the service without one: `start()`, `BootReceiver` and `onStartCommand` (a `START_STICKY` revival) all check.
+- A location post answered with 401 (token revoked) or 404 (source removed) drops the batch and runs the same
+  sign-out as the bridge, service included, so a dead token never keeps the service alive. Anything else (no network,
+  5xx) keeps the batch queued for the next try. The web app sees the same 401 on its next request and signs out too;
+  if the shell was wrong (a transient 404 while the node was being redeployed) the web app re-calls `setIngestUrl`
+  on its next open, since its session is still good.
+- Pushes that arrive after sign-out are ignored (`FCMService` checks for an ingest URL).
 - Self-hosted nodes need their own Firebase project and their own build of this app (the app is bound to
   one FCM project via `google-services.json`), or a push relay; see DESIGN.md §4.
-- Files: `MainActivity` (WebView + bridge + fallback), `Prefs`, `ApiClient`, `LocationService`, `ActivityReceiver`,
-  `FCMService`, `NotificationActionReceiver`, `ContactsSync`, `BootReceiver`.
+- Files: `MainActivity` (WebView + bridge + fallback), `Prefs`, `Session` (sign-out), `ApiClient`, `LocationService`,
+  `ActivityReceiver`, `FCMService`, `NotificationActionReceiver`, `ContactsSync`, `BootReceiver`.

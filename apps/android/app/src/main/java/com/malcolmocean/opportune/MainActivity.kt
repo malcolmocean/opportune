@@ -451,6 +451,16 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        /**
+         * The web app forgets its token and calls this so the shell forgets too: ingest URL, FCM
+         * registration, contacts switch, queued points, the running service. Nothing is posted after it
+         * returns. Permissions stay granted at the OS level; `contacts` reads false because the switch is off.
+         */
+        @JavascriptInterface fun signOut() {
+            Session.signOut(this@MainActivity, "web app signed out")
+            runOnUiThread { emitPermissions() }
+        }
+
         @JavascriptInterface fun getPermissions(): String = permissionsJson().toString()
 
         @JavascriptInterface fun requestLocation() { runOnUiThread { requestLocationChain() } }

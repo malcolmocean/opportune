@@ -67,6 +67,12 @@ class LocationService : Service() {
             try { ContextCompat.startForegroundService(context, Intent(context, LocationService::class.java)) }
             catch (e: Exception) { Log.e(TAG, "Could not start foreground service", e) }
         }
+
+        /** No-op if it isn't running. onDestroy drops the queue and the location/activity registrations. */
+        fun stop(context: Context) {
+            try { context.stopService(Intent(context, LocationService::class.java)) }
+            catch (e: Exception) { Log.w(TAG, "Could not stop service: ${e.message}") }
+        }
     }
 
     private lateinit var fused: FusedLocationProviderClient
@@ -92,6 +98,14 @@ class LocationService : Service() {
         val n = buildNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
         else startForeground(NOTIFICATION_ID, n)
+        // start() already checks, but START_STICKY can revive us (intent == null) after a sign-out or a
+        // process kill with no URL left. Never run without somewhere to post to.
+        if (!Prefs.isConfigured(this)) {
+            Log.w(TAG, "no ingest URL; stopping")
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return START_NOT_STICKY
+        }
         startLocationUpdates()
         startActivityUpdates()
         startHeartbeat()
@@ -189,7 +203,19 @@ class LocationService : Service() {
         scope.launch { flush() }
     }
 
+    /**
+     * Transient failures (no network, 5xx, timeouts) keep the batch for the next try. 401 (token revoked)
+     * and 404 (source removed) are final: the node will never take these points, so the whole session
+     * goes, service included. The web app notices the same thing on its next request and signs out too.
+     */
     private suspend fun flush() = flushLock.withLock {
+        if (!Prefs.isConfigured(this)) {
+            // signed out while points were queued (or while a post was in flight): nothing to post to
+            val n = synchronized(queue) { queue.size.also { queue.clear() } }
+            if (n > 0) Log.w(TAG, "no ingest URL; dropped $n queued point(s)")
+            stopSelf()
+            return@withLock
+        }
         val batch = synchronized(queue) { ArrayList(queue) }
         if (batch.isEmpty()) return@withLock
         val arr = JSONArray(); batch.forEach { arr.put(it) }
@@ -198,9 +224,9 @@ class LocationService : Service() {
             synchronized(queue) { queue.removeAll(batch.toSet()) }
             Log.d(TAG, "posted ${batch.size} point(s)")
         } else if (code == 401 || code == 404) {
-            // token revoked or source removed: drop the batch, the user has to re-paste a URL
-            synchronized(queue) { queue.removeAll(batch.toSet()) }
-            Log.w(TAG, "ingest URL rejected ($code); dropping ${batch.size} point(s)")
+            synchronized(queue) { queue.clear() }
+            Log.w(TAG, "ingest URL rejected ($code); dropping ${batch.size} point(s) and signing out")
+            Session.signOut(this, "node answered $code")
         } else {
             Log.w(TAG, "keeping ${batch.size} point(s) queued (code $code)")
         }

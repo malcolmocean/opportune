@@ -42,7 +42,9 @@ export function makeQuery(db, ctx) {
     },
     // Fan out one question to many friends; aggregate structured answers.
     async fanout(from, { kind = 'availability', text, window, context, toIds }) {
-      const ids = toIds || ctx.people.friendsOf(from).map(f => f.id)
+      // shadows (Maps contacts who never joined) have no agent; a remote friend with no edge back to us would just say 'not a friend'
+      const eligible = f => f.onboarding?.step !== 'shadow' && (!f.remote || !!ctx.people.rel(f.id, from))
+      const ids = (toIds ? toIds.map(id => ctx.people.get(id)).filter(Boolean) : ctx.people.friendsOf(from)).filter(eligible).map(f => f.id)
       const results = await Promise.all(ids.map(async to => ({ to, name: ctx.people.get(to)?.display_name, ...(await Q.ask({ from, to, kind, text, window, context })) })))
       return results.sort((a, b) => rank(a.answer) - rank(b.answer))
     },
@@ -50,4 +52,10 @@ export function makeQuery(db, ctx) {
   return Q
 }
 const rank = a => ({ yes: 0, likely: 1, unlikely: 2, no: 3, unsupported: 4 }[a] ?? 5)
-const suggestFor = kind => ({ availability: { plugin: 'queries/availability', repo: 'https://github.com/malcolmocean/opportune', setup: 'add a calendar source' }, plans: { plugin: 'queries/plans', setup: 'add a calendar source' }, whereabouts: { plugin: 'queries/whereabouts', setup: 'add a location source' }, dropin: { plugin: 'queries/dropin', setup: 'set porchlight + add a location source' } }[kind])
+const REPO = 'https://github.com/malcolmocean/opportune/tree/main'
+const suggestFor = kind => ({
+  availability: { plugin: 'queries/availability', repo: `${REPO}/queries/availability`, setup: 'add a calendar source' },
+  plans: { plugin: 'queries/plans', repo: `${REPO}/queries/plans`, setup: 'add a calendar source' },
+  whereabouts: { plugin: 'queries/whereabouts', repo: `${REPO}/queries/whereabouts`, setup: 'add a location source' },
+  dropin: { plugin: 'queries/dropin', repo: `${REPO}/queries/dropin`, setup: 'set porchlight + add a location source' },
+}[kind])

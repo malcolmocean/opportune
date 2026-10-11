@@ -29,10 +29,12 @@ export function manageUrl(ctx, personId) {
   return `${ctx.people.nodeUrl}/web/manage?token=${token}`
 }
 
-// Resolve a token (manage token or a source ingest token) to a local, non-shadow person.
+// Resolve a token to a local, non-shadow person: a manage token, or the opportune app's own ingest token.
+// Other sources' ingest tokens (OwnTracks, Overland, ...) sit in third-party apps and don't carry manage rights.
 export function personForToken(ctx, token) {
   if (!token || typeof token !== 'string' || token.length > 200) return null
-  const personId = ctx.db.kvGet(`manage:${token}`)?.personId || ctx.sources.byToken(token)?.person_id
+  const sc = ctx.sources.byToken(token)
+  const personId = ctx.db.kvGet(`manage:${token}`)?.personId || (sc?.source_id === 'opportuneApp' && sc.enabled ? sc.person_id : null)
   if (!personId) return null
   const p = ctx.people.get(personId)
   if (!p || p.remote || isShadow(p)) return null
@@ -80,9 +82,7 @@ export async function mountWeb(app, ctx) {
   }
   const manifestView = m => ({ id: m.id, name: m.name, description: m.description, kinds: m.kinds, repo: m.repo, hasIngest: !!m.ingest, hasPoll: !!m.poll,
     setup: (m.setup || []).map(s => ({ key: s.key, type: s.type, label: s.label, choices: s.choices, instructions: s.instructions })) })
-  const decisionsFor = (id, limit = 50) => ctx.db.all(`select d.id, d.verdict, d.reasoning, d.rating, d.rating_note, d.rated_at, d.created_at, d.nudge_id,
-      o.summary, o.kind, o.trigger_id, o.expires_at from decisions d left join opportunities o on o.id = d.opportunity_id
-      where d.person_id = ? order by d.created_at desc limit ?`, id, limit)
+  const decisionsFor = (id, limit = 50) => ctx.judge.reviewable(id, null, { limit })
     .map(d => ({ id: d.id, verdict: d.verdict, reasoning: d.reasoning, rating: d.rating, ratingNote: d.rating_note, ratedAt: d.rated_at, createdAt: d.created_at,
       nudgeId: d.nudge_id, opportunity: { summary: d.summary, kind: d.kind, trigger: d.trigger_id, expiresAt: d.expires_at } }))
 

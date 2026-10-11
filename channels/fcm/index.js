@@ -63,7 +63,7 @@ export async function handleAppPayload(ctx, person, body, config = {}) {
   }
   if (body.nudgeResponse?.nudgeId && body.nudgeResponse.key) {
     const { nudgeId, key } = body.nudgeResponse
-    if (key.startsWith('wish:')) ctx.judge.rate(key.slice(5), 'good', 'person wished they had been told')
+    if (key.startsWith('wish:')) ctx.judge.rate(key.slice(5), 'bad', 'should have nudged: person wished they had been told')   // the suppress was the wrong call
     else await ctx.nudges.respond(nudgeId, key, body.nudgeResponse.note)
   }
   if (body.status && PORCHLIGHT.has(body.status.porchlight)) {

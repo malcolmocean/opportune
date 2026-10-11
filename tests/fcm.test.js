@@ -90,12 +90,13 @@ test('{ nudgeResponse } records the response and rates the decision', async () =
   assert.equal((await ctx.sources.ingest('opportuneApp', sc.token, { nudgeResponse: { nudgeId: 'nope', key: 'yes' } })).length, 0)
 })
 
-test('wish:<decisionId> responses rate the suppression good', async () => {
+test('wish:<decisionId> ("should have told me") rates the suppression bad', async () => {
   const { ctx, p } = await setup()
   const rated = []
   ctx.judge.rate = (id, r, note) => rated.push([id, r, note])
   await handleAppPayload(ctx, p, { nudgeResponse: { nudgeId: 'x', key: 'wish:dec1' } })
-  assert.deepEqual(rated[0].slice(0, 2), ['dec1', 'good'])
+  assert.deepEqual(rated[0].slice(0, 2), ['dec1', 'bad'])
+  assert.match(rated[0][2], /should have nudged/)
 })
 
 test('{ contacts } → ctx.people.addContacts', async () => {

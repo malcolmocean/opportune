@@ -12,11 +12,11 @@ Every plugin function receives `ctx` first:
 | ctx member | what |
 |---|---|
 | `ctx.db` | sqlite wrapper: `get/all/run/insert/kvGet/kvSet` (see `core/db.js`) |
-| `ctx.people` | `addContacts(ownerId, [{name, emails, phones}])`, `contactName(ownerId, {email})`, `ownersWithContact('email', v)`, `get(id)`, `all()`, `friendsOf(id)` (outgoing edges), `connections(id)` (either direction, with `.outgoing`/`.incoming`), `home(id)`, `rel(from,to)` (has `.effectiveGrants`), `setRel`, `identities(id)`, `bind`, `places(id)`, `addPlace`, `invite`, `policy(id)`, `nodeUrl` |
+| `ctx.people` | `get(id)`, `all()`, `create({displayName, tz})`, `update(id, patch)`, `identify(channel, externalId)`, `bind(personId, channel, externalId)`, `identities(id)`, `addContacts(ownerId, [{name, emails, phones}])`, `contactName(ownerId, {email})`, `ownersWithContact('email', v)`, `friendsOf(id)` (outgoing edges), `connections(id)` (either direction, with `.outgoing`/`.incoming`), `rel(from,to)` (has `.effectiveGrants`), `setRel(from, to, patch)` (only tier/wantMore/travel/note/grants/via/vouch), `mutual(a,b)`, `home(id)`, `places(id)`, `addPlace` (name `'home'` also sets `home_place_id`), `invite`, `peekInvite(code)`, `acceptInvite(code, joinerId)`, `policy(id)`, `nodeUrl` |
 | `ctx.observations` | `ingest(personId, sourceId, obs[])`, `latest(personId, kind, {within, activeOnly})`, `recent(personId, {kinds, since, limit})`, `eventsIn(personId, startIso, endIso)` |
 | `ctx.query` | `ask({from,to,kind,text,window})`, `fanout(from, {...})` |
-| `ctx.nudges` | `send(personId, {text, actions, decisionId})`, `respond(nudgeId, actionKey)` |
-| `ctx.judge` | `rate(decisionId, 'good'|'bad', note)` |
+| `ctx.nudges` | `send(personId, {text, actions, decisionId}, {from})` (`from`: the local person it's on behalf of; signs the request when the target is remote), `respond(nudgeId, actionKey)` |
+| `ctx.judge` | `rate(decisionId, 'good'|'bad', note)`, `reviewable(personId, since?, {limit, verdict})` (decisions safe to show the person; relationship gates excluded) |
 | `ctx.llm` | `complete({system,messages})`, `json({...})`, `agent({system,messages,tools})`; `ctx.llm.enabled` |
 | `ctx.sources` | `forPerson(id)`, `connect(personId, sourceId, config)`, `ingestUrl(sourceConfig)` |
 | `ctx.geo` | `distanceM(a,b)`, `fmtDistance`, `minutesAgo` |
@@ -107,7 +107,8 @@ export default {
 ```
 When the human taps an action, call `ctx.nudges.respond(nudge.id, actionKey)`. Action
 keys `yes`/`no`/`bad` have built-in meaning (bad = rate decision bad). `wish:<decisionId>`
-means "should have told me" (rate good → the suppression was wrong). Identities: find the
+means "should have told me": rate that suppress decision **bad** (a bad rating on a suppress
+means "should have nudged"; on a nudge it means "should have stayed quiet"). Identities: find the
 person with `ctx.people.identify('fcm', token)`; bind with `ctx.people.bind(personId, 'fcm', token)`.
 
 ## Testing locally
@@ -118,5 +119,5 @@ pnpm dev
 node scripts/seed.js   # two people, places, a relationship, sample events
 curl -X POST localhost:3400/ingest/locationPost/<token> -H 'content-type: application/json' -d '{"lat":37.76,"lng":-122.43}'
 ```
-Unit tests: `node --test tests/`. Build a context against an in-memory db with
+Unit tests: `node --test "tests/*.test.js"`. Build a context against an in-memory db with
 `buildContext(process.env, { dbPath: ':memory:' })`.

@@ -140,7 +140,7 @@ export function makePeople(db, env, events) {
     home(ownerId) {
       const hid = db.get('select home_place_id from people where id = ?', ownerId)?.home_place_id
       const byId = hid && db.get('select * from places where id = ? and owner_id = ?', hid, ownerId)
-      return byId || db.get(`select * from places where owner_id = ? and name = 'home' order by created_at desc limit 1`, ownerId) || null
+      return byId || db.get(`select * from places where owner_id = ? and name = 'home' order by created_at desc, rowid desc limit 1`, ownerId) || null
     },
     // friends in either direction: [{ ...person, outgoing: rel|null, incoming: rel|null }]
     connections(personId) {

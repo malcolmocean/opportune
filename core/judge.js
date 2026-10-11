@@ -1,4 +1,5 @@
 import { uid, now } from './db.js'
+import { localHour } from './geo.js'
 import { log } from './log.js'
 const L = log('judge')
 
@@ -15,32 +16,40 @@ export function makeJudge(db, ctx) {
         const gate = J.gate(person, opp)
         if (gate) { J.record(personId, opp, 'suppress', `gate: ${gate}`); continue }
         const verdict = await J.decide(person, opp)
+        const other = opp.participants.find(p => p !== personId)   // the nudge is "from" the other participant, for federation signing
+        if (verdict.verdict === 'ask' && !other) {   // single-participant opportunity (e.g. contact on a guest list): nobody to ask, so just nudge
+          verdict.verdict = 'nudge'
+          verdict.text = verdict.text || verdict.ask?.text || opp.summary
+          verdict.actions = verdict.actions?.length ? verdict.actions : defaultActions(opp)
+          verdict.reasoning = `${verdict.reasoning || ''} (nobody to ask; nudged instead)`.trim()
+        }
         const d = J.record(personId, opp, verdict.verdict, verdict.reasoning)
         if (verdict.verdict === 'nudge') {
-          await ctx.nudges.send(personId, { text: verdict.text, actions: verdict.actions || [], decisionId: d.id, expiresAt: opp.expires_at })
+          await ctx.nudges.send(personId, { text: verdict.text, actions: verdict.actions || [], decisionId: d.id, expiresAt: opp.expires_at }, { from: other })
         } else if (verdict.verdict === 'ask' && verdict.ask) {
           // ask the other participant's agent first, then nudge with the answer
-          const other = opp.participants.find(p => p !== personId)
           const ans = await ctx.query.ask({ from: personId, to: other, kind: verdict.ask.kind || 'availability', text: verdict.ask.text, context: opp.summary })
           const follow = await J.decide(person, opp, { askedKind: verdict.ask.kind, answer: ans })
-          const d2 = J.record(personId, opp, follow.verdict, `after asking ${other} (${ans.answer}): ${follow.reasoning}`)
-          if (follow.verdict === 'nudge') await ctx.nudges.send(personId, { text: follow.text, actions: follow.actions || [], decisionId: d2.id, expiresAt: opp.expires_at })
+          const d2 = J.record(personId, opp, follow.verdict, `after asking ${J.nameOf(other)} (${ans.answer}): ${follow.reasoning}`)
+          if (follow.verdict === 'nudge') await ctx.nudges.send(personId, { text: follow.text, actions: follow.actions || [], decisionId: d2.id, expiresAt: opp.expires_at }, { from: other })
         }
       }
     },
+    nameOf(id) { return ctx.people.get(id)?.display_name || 'someone' },
     gate(person, opp) {
       const pol = ctx.people.policy(person.id)
-      const hour = Number(new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: person.tz }).format(new Date()))
+      const hour = localHour(person.tz)
       const { start, end } = pol.quietHours || {}
       if (start != null && (start > end ? (hour >= start || hour < end) : (hour >= start && hour < end))) return 'quiet hours'
-      const today = db.get(`select count(*) c from nudges where person_id = ? and created_at > ?`, person.id, new Date(Date.now() - 864e5).toISOString()).c
+      // the cap counts Judge nudges only (decision_id set); digests, veto nudges and query replies don't eat into it
+      const today = db.get(`select count(*) c from nudges where person_id = ? and decision_id is not null and created_at > ?`, person.id, new Date(Date.now() - 864e5).toISOString()).c
       if (today >= (pol.maxNudgesPerDay ?? 6)) return 'daily nudge cap'
       // wantMore filter: at least one side of each pair must want more of the other
       if (opp.kind === 'contactJoined') return null   // the whole point is that there's no relationship yet
       for (const other of opp.participants.filter(p => p !== person.id)) {
         const a = ctx.people.rel(person.id, other), b = ctx.people.rel(other, person.id)
-        if (!a && !b) return `no relationship with ${other}`
-        if (!(a?.want_more || b?.want_more)) return `neither side marked wantMore for ${other}`
+        if (!a && !b) return `no relationship with ${J.nameOf(other)}`
+        if (!(a?.want_more || b?.want_more)) return `neither side marked wantMore for ${J.nameOf(other)}`
       }
       return null
     },
@@ -63,8 +72,8 @@ You decide, for ONE person, whether a detected opportunity is worth a nudge righ
 The person's time and attention are precious: a bad nudge costs trust, a missed great one costs a hangout. Err toward quiet for low-value or ambiguous, but do not be timid about genuinely good, time-sensitive ones.
 Never reveal one participant's private settings (travel willingness, notes) to another. The nudge text goes to the person named below only.
 Write nudge text in a warm, brief, slightly playful voice. One or two sentences. Include the concrete fact (who/where/when). Suggest the cheapest action.
-Verdicts: "suppress" (log only), "nudge" (send text now), "ask" (first ask the other participant's agent a question of kind availability|dropin|plans, then decide).
-Past ratings from this person on your earlier calls are the strongest signal of what they want.`
+Verdicts: "suppress" (log only), "nudge" (send text now), "ask" (first ask the other participant's agent a question of kind availability|dropin|plans, then decide). When otherParticipants is empty there is nobody to ask: choose suppress or nudge.
+Past ratings from this person on your earlier calls are the strongest signal of what they want. A rating is about the verdict, not the event: "bad" on a suppress means "I should have been nudged"; "bad" on a nudge means "you should have stayed quiet"; "good" means the call was right.`
       const user = {
         person: { id: person.id, name: person.display_name, tz: person.tz, policy: ctx.people.policy(person.id) },
         opportunity: { kind: opp.kind, summary: opp.summary, evidence: opp.evidence, expiresAt: opp.expires_at, trigger: opp.trigger_id },
@@ -90,10 +99,16 @@ Past ratings from this person on your earlier calls are the strongest signal of 
     rate(decisionId, rating, note) {
       db.run('update decisions set rating = ?, rating_note = ?, rated_at = ? where id = ?', rating, note || null, now(), decisionId)
     },
-    // for the daily digest: what we stayed quiet about
-    suppressedSince(personId, sinceIso) {
-      return db.all(`select d.*, o.summary, o.kind from decisions d join opportunities o on o.id = d.opportunity_id where d.person_id = ? and d.verdict = 'suppress' and d.created_at > ? and d.reasoning not like 'gate: no relationship%' order by d.created_at desc limit 10`, personId, sinceIso)
+    // Decisions this person may review (digest, manage page, admin). Relationship gates are excluded: they
+    // would reveal a friend's presence/place to someone that friend never opted in to sharing with.
+    reviewable(personId, sinceIso = null, { limit = 50, verdict = null } = {}) {
+      const conds = ['d.person_id = ?', `d.reasoning not like 'gate: no relationship%'`, `d.reasoning not like 'gate: neither side%'`], p = [personId]
+      if (sinceIso) { conds.push('d.created_at > ?'); p.push(sinceIso) }
+      if (verdict) { conds.push('d.verdict = ?'); p.push(verdict) }
+      return db.all(`select d.*, o.summary, o.kind, o.trigger_id, o.expires_at from decisions d left join opportunities o on o.id = d.opportunity_id where ${conds.join(' and ')} order by d.created_at desc limit ?`, ...p, limit)
     },
+    // for the daily digest: what we stayed quiet about
+    suppressedSince(personId, sinceIso) { return J.reviewable(personId, sinceIso, { verdict: 'suppress', limit: 10 }) },
   }
   return J
 }

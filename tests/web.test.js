@@ -60,11 +60,14 @@ test('api requires a valid token; shadow and remote tokens are refused', async (
   assert.equal(r.status, 200)
 })
 
-test('a source ingest token also authenticates (Android deep link)', async () => {
-  const sc = ctx.sources.connect(me.id, 'locationPost', { app: 'OwnTracks' })
+test('the opportune app\'s ingest token authenticates; other sources\' ingest tokens do not', async () => {
+  const sc = ctx.sources.connect(me.id, 'opportuneApp', { device: {} })
   const r = await j('/api/manage/me', { token: sc.token })
   assert.equal(r.status, 200)
   assert.equal(r.body.person.id, me.id)
+  const other = ctx.sources.connect(me.id, 'locationPost', { app: 'OwnTracks' })
+  assert.equal((await j('/api/manage/me', { token: other.token })).status, 401, 'a third-party app token is not manage auth')
+  assert.equal(personForToken(ctx, other.token), null)
 })
 
 test('GET /me returns friends with both directions, shadow flag, sources, decisions, nudges', async () => {

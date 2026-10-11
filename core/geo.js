@@ -7,3 +7,5 @@ export function distanceM(a, b) {
 }
 export const fmtDistance = m => (m < 1000 ? `${Math.round(m)}m` : `${(m / 1000).toFixed(1)}km`)
 export const minutesAgo = iso => Math.round((Date.now() - new Date(iso).getTime()) / 60000)
+// Local hour 0..23 in an IANA tz. hourCycle 'h23' so midnight is 0, never 24.
+export const localHour = (tz, d = new Date()) => Number(new Intl.DateTimeFormat('en-US', { hour: 'numeric', hourCycle: 'h23', timeZone: tz || 'UTC' }).format(d))

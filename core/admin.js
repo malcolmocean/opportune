@@ -1,6 +1,18 @@
 // Admin overview: who's signed up, which connectors, how many friends, and LLM token spend.
 // Guarded by ADMIN_TOKEN (query ?token= or x-admin-token header). Mounted by server.js.
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+const here = dirname(fileURLToPath(import.meta.url))
 const DAY = 864e5
+
+// Is this request carrying the admin token? False when no ADMIN_TOKEN is configured.
+export function adminOk(ctx, req) {
+  const token = ctx.env?.ADMIN_TOKEN || process.env.ADMIN_TOKEN
+  return !!token && (req.query?.token === token || req.get?.('x-admin-token') === token)
+}
+
+// Dev-only routes: open outside production, admin-token-gated in production.
+export const devOk = (ctx, req) => (ctx.env?.NODE_ENV || process.env.NODE_ENV) !== 'production' || adminOk(ctx, req)
 const ago = ms => new Date(Date.now() - ms).toISOString()
 
 // since: ISO string, or relative like '7d' / '36h'. Default 30 days.
@@ -13,13 +25,11 @@ export function parseSince(s, fallbackMs = 30 * DAY) {
 }
 
 export function mountAdmin(app, ctx) {
-  const token = () => ctx.env?.ADMIN_TOKEN || process.env.ADMIN_TOKEN
-  const adminOk = req => token() && (req.query.token === token() || req.get('x-admin-token') === token())
-
-  app.get('/web/admin', (req, res) => adminOk(req) ? res.sendFile('admin.html', { root: 'web' }) : res.status(401).send('admin token required: /web/admin?token=…'))
+  // admin.html lives in core/ (not under the /web static mount) so it is only ever served through this check
+  app.get('/web/admin', (req, res) => adminOk(ctx, req) ? res.sendFile(join(here, 'admin.html')) : res.status(401).send('admin token required: /web/admin?token=…'))
 
   app.get('/api/admin/overview', (req, res) => {
-    if (!adminOk(req)) return res.status(401).json({ error: 'admin token required' })
+    if (!adminOk(ctx, req)) return res.status(401).json({ error: 'admin token required' })
     const db = ctx.db
     const since7d = ago(7 * DAY), since30d = ago(30 * DAY)
     const usage7d = Object.fromEntries(ctx.llm.usage({ since: since7d, groupBy: 'person' }).map(r => [r.person_id, r]))
@@ -36,7 +46,7 @@ export function mountAdmin(app, ctx) {
         home: !!ctx.people.home(p.id),
         observations: db.get('select count(*) c, max(at) last from observations where person_id = ?', p.id),
         nudges: db.get('select count(*) c, sum(case when response is not null then 1 else 0 end) answered from nudges where person_id = ?', p.id),
-        decisions: db.get(`select count(*) c, sum(case when verdict = 'suppress' then 1 else 0 end) quiet, sum(case when rating is not null then 1 else 0 end) rated from decisions where person_id = ?`, p.id),
+        decisions: counts(ctx.judge.reviewable(p.id, null, { limit: 100000 })),   // same filter as the manage page: relationship gates stay out
         invitesOpen: db.get('select count(*) c from invites where inviter_id = ? and used_by is null and expires_at > ?', p.id, new Date().toISOString()).c,
         usage7d: { calls: u?.calls || 0, tokens: (u?.input_tokens || 0) + (u?.output_tokens || 0) + (u?.cache_read_tokens || 0) + (u?.cache_write_tokens || 0), costUsd: u?.cost_usd || 0 },
       }
@@ -53,10 +63,12 @@ export function mountAdmin(app, ctx) {
 
   // Raw aggregation: /api/admin/usage?since=7d&groupBy=person-day
   app.get('/api/admin/usage', (req, res) => {
-    if (!adminOk(req)) return res.status(401).json({ error: 'admin token required' })
+    if (!adminOk(ctx, req)) return res.status(401).json({ error: 'admin token required' })
     const since = parseSince(req.query.since), groupBy = req.query.groupBy || 'process'
     try {
       res.json({ since, groupBy, rows: ctx.llm.usage({ since, until: req.query.until || undefined, groupBy }) })
     } catch (e) { res.status(400).json({ error: e.message }) }
   })
 }
+
+const counts = rows => ({ c: rows.length, quiet: rows.filter(d => d.verdict === 'suppress').length, rated: rows.filter(d => d.rating != null).length })

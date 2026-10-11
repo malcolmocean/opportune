@@ -8,6 +8,7 @@ User=opportune
 WorkingDirectory=/opt/opportune
 EnvironmentFile=/opt/opportune/.env
 Environment=PORT=3400
+Environment=NODE_ENV=production
 Environment=MAPS_SHARING_PYTHON=/opt/opportune/sources/mapsSharing/.venv/bin/python
 ExecStart=/usr/bin/node server.js
 Restart=always

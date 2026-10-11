@@ -52,9 +52,11 @@ export function makeFederation(db, ctx) {
         return ans
       } catch (e) { L.warn('remote ask failed', e.message); return { answer: 'unsupported', reason: e.message } }
     },
-    async deliverNudge(remotePerson, nudge) {
+    async deliverNudge(remotePerson, nudge, { from = null } = {}) {
       // Nudge to someone on another node: their node renders it through their channels.
-      const me = ctx.people.all().find(p => !p.remote)   // node identity for signing; fine for v1
+      // Signed by `from` (the local person it's on behalf of) when given; else any local person as node identity.
+      const sender = from && ctx.people.get(typeof from === 'string' ? from : from.id)
+      const me = sender && !sender.remote && sender.privkey ? sender : ctx.people.all().find(p => !p.remote)
       return F.post(me, remotePerson.node_url, '/nudge', { to: remotePerson.id, ...nudge })
     },
     // Accepting an invite across nodes: joiner's node calls inviter's node.
@@ -74,7 +76,10 @@ export function makeFederation(db, ctx) {
     acceptIncoming({ code, joiner }) {
       const inv = ctx.people.peekInvite(code)
       if (!inv) return { error: 'invalid or used invite' }
-      if (!ctx.people.get(joiner.id)) ctx.people.create({ id: joiner.id, displayName: joiner.displayName, remote: true, nodeUrl: joiner.nodeUrl, pubkey: joiner.pubkey })
+      if (!joiner?.id || !joiner.pubkey) return { error: 'joiner id and pubkey required' }
+      const existing = ctx.people.get(joiner.id)
+      if (existing && (!existing.remote || existing.pubkey !== joiner.pubkey)) return { error: 'id taken' }   // a local person, or a remote one with another key
+      if (!existing) ctx.people.create({ id: joiner.id, displayName: joiner.displayName, remote: true, nodeUrl: joiner.nodeUrl, pubkey: joiner.pubkey })
       const inviter = ctx.people.acceptInvite(code, joiner.id)
       return { inviter: { id: inviter.id, displayName: inviter.display_name, pubkey: inviter.pubkey }, tier: inv.tier, wantMore: !!inv.want_more }
     },

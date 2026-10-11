@@ -218,6 +218,8 @@ test('query: ask → likely + veto nudge to Eileen; veto closes porchlight for 2
   const st = ctx.observations.latest(eileen.id, 'status')
   assert.equal(st.source_id, 'dropin')
   assert.equal(st.data.porchlight, 'closed')
+  assert.match(st.data.reason, /vetoed a drop-in from Jess/)
+  assert.equal(st.data.note, undefined, 'the veto cause is not a note (notes are shown to friends)')
   const closeFor = new Date(st.until) - Date.now()
   assert.ok(closeFor > 118 * 60e3 && closeFor <= 120 * 60e3, 'closed for ~2h')
   a = await ask()

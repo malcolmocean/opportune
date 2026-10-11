@@ -1,5 +1,13 @@
+import { localHour } from './geo.js'
 import { log } from './log.js'
 const L = log('cron')
+
+// Where a setting lives for this person: "with /home" if they have the Telegram bot, else the app's Settings + manage link.
+export async function settingsHint(ctx, personId, command) {
+  if (ctx.people.identities(personId).some(i => i.channel === 'telegram')) return `with ${command}`
+  const { manageUrl } = await import('../web/routes.js')
+  return `in the app's Settings (${manageUrl(ctx, personId)})`
+}
 
 // Deliberately boring: setInterval ticks. Jobs: poll sources, run cron triggers,
 // daily digest (incl. "I stayed quiet about..."), expire opportunities.
@@ -23,11 +31,11 @@ export function startCron(ctx) {
 // For people without a declared home: the median of overnight (1am–5am local) fixes over the last 14 days, if there are enough.
 export function inferHomes(ctx) {
   let n = 0
-  for (const p of ctx.people.all()) {
+  for (const p of ctx.people.all().filter(p => p.onboarding?.step === 'done')) {
     if (ctx.people.home(p.id)) continue
     const since = new Date(Date.now() - 14 * 864e5).toISOString()
     const pts = ctx.observations.recent(p.id, { kinds: ['location'], since, limit: 2000 }).filter(o => {
-      const h = Number(new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: p.tz }).format(new Date(o.at)))
+      const h = localHour(p.tz, new Date(o.at))
       return h >= 1 && h < 5 && o.data?.lat
     })
     if (pts.length < 5) continue
@@ -37,7 +45,9 @@ export function inferHomes(ctx) {
     if (near / pts.length < 0.6) continue   // sleeps in too many places; don't guess
     ctx.people.addPlace(p.id, { name: 'home', lat, lng, radiusM: 120 })
     n++
-    ctx.nudges.send(p.id, { text: `I think I've worked out where home is from where your phone sleeps. If that's wrong, /home to set it.`, actions: [{ key: 'yes', label: 'Looks right' }] }).catch(() => {})
+    settingsHint(ctx, p.id, '/home')
+      .then(how => ctx.nudges.send(p.id, { text: `I think I've worked out where home is from where your phone sleeps. If that's wrong, set it ${how}.`, actions: [{ key: 'yes', label: 'Looks right' }] }))
+      .catch(() => {})
   }
   return n
 }
@@ -47,7 +57,7 @@ export function makeDigest(db, ctx) {
   return {
     async tick() {
       for (const p of ctx.people.all().filter(p => p.onboarding?.step === 'done')) {
-        const hour = Number(new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: p.tz }).format(new Date()))
+        const hour = localHour(p.tz)
         const want = p.policy?.digestHour ?? 9
         const key = `digest:${p.id}`, last = db.kvGet(key)
         const today = new Date().toISOString().slice(0, 10)
@@ -64,7 +74,7 @@ export function makeDigest(db, ctx) {
       let text = `Morning. `
       if (upcoming.length) text += `Coming up: ${upcoming.map(e => `${e.data.title} (${new Date(e.at).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', timeZone: p.tz })})`).join(', ')}. `
       if (quiet.length) text += `\n\nI stayed quiet about ${quiet.length} thing${quiet.length > 1 ? 's' : ''}:\n` + quiet.map((q, i) => `${i + 1}. ${q.summary}  (${q.reasoning?.replace(/^gate: /, '')})`).join('\n') + `\n\nTap one if I should have told you.`
-      const actions = quiet.slice(0, 4).map((q, i) => ({ key: `wish:${q.id}`, label: `Should've told me #${i + 1}` }))
+      const actions = quiet.slice(0, 4).map((q, i) => ({ key: `wish:${q.id}`, label: `Should've told me #${i + 1}` }))   // wish:<id> → channel rates that suppress decision 'bad'
       await ctx.nudges.send(p.id, { text, actions })
     },
   }

@@ -5,9 +5,10 @@ const L = log('nudges')
 export function makeNudges(db, ctx) {
   const N = {
     // Deliver through the person's channels in preference order: native push, telegram, anything else.
-    async send(personId, { text, actions = [], decisionId = null, expiresAt = null }) {
+    // opts.from: the local person this nudge is on behalf of (signs the federation request when the target is remote)
+    async send(personId, { text, actions = [], decisionId = null, expiresAt = null }, { from = null } = {}) {
       const person = ctx.people.get(personId)
-      if (person?.remote) return ctx.federation.deliverNudge(person, { text, actions, decisionId, expiresAt })
+      if (person?.remote) return ctx.federation.deliverNudge(person, { text, actions, decisionId, expiresAt }, { from })
       const row = { id: uid(), person_id: personId, decision_id: decisionId, text, actions, channel: null, external_id: null, expires_at: expiresAt, created_at: now() }
       db.insert('nudges', row)
       const ids = ctx.people.identities(personId)

@@ -1,7 +1,7 @@
 // "Jess is a block away, ok if she drops by?" Answered deterministically for `to` from porchlight,
 // presence and calendar. In the 'ask' state we answer 'likely' and give `to` a veto nudge; a veto
 // closes the porchlight for two hours so the next ask says no. No LLM. Never reveals location
-// beyond home / not home.
+// beyond home / not home. The veto's cause goes in data.reason (host-only), never in data.note (shown to friends).
 import { porchlight, presence } from './porchlight.js'
 
 const SOURCE_ID = 'dropin'
@@ -60,7 +60,7 @@ export default {
       text: `${who} is a block away and might drop by in the next little while. I said it's probably fine.`,
       actions: [{ key: 'yes', label: 'Yes come by' }, { key: 'veto', label: 'Not now' }],
       expiresAt: until,
-    })
+    }, { from: from?.id })
     if (nudge?.id) {
       ctx.db.kvSet(nudgeKey(nudge.id), { from: fromId, to: to.id, until })
       ctx.db.kvSet(pendingKey(to.id, fromId), { nudgeId: nudge.id, until })
@@ -86,11 +86,11 @@ async function onResponse(ctx, nudge, actionKey) {
     if (rec.until < nowIso) return    // window passed; nothing to close
     await ctx.observations.ingest(rec.to, SOURCE_ID, [{
       kind: 'status', at: nowIso, until: new Date(Date.now() + VETO_CLOSE_MS).toISOString(),
-      data: { porchlight: 'closed', note: `vetoed a drop-in from ${from?.display_name || rec.from}` },
+      data: { porchlight: 'closed', reason: `vetoed a drop-in from ${from?.display_name || rec.from}` },
     }])
-    if (from) await ctx.nudges.send(rec.from, { text: `${to?.display_name || 'They'}'s not up for it right now, another time.`, actions: [] })
+    if (from) await ctx.nudges.send(rec.from, { text: `${to?.display_name || 'They'}'s not up for it right now, another time.`, actions: [] }, { from: rec.to })
   } else if (actionKey === 'yes' && from) {
-    await ctx.nudges.send(rec.from, { text: `${to?.display_name || 'They'} says come on by.`, actions: [] })
+    await ctx.nudges.send(rec.from, { text: `${to?.display_name || 'They'} says come on by.`, actions: [] }, { from: rec.to })
     await graduate(ctx, to, from)
   }
 }
@@ -106,7 +106,7 @@ async function graduate(ctx, to, from) {
   const nudge = await ctx.nudges.send(to.id, {
     text: `You've said yes to ${from.display_name} dropping by ${n} times. Want me to just say yes for them from now on? You can always flip your porchlight to closed.`,
     actions: [{ key: `grant:autoYesDropin:${from.id}`, label: 'Yes, auto-yes them' }, { key: 'no', label: 'Keep asking me' }],
-  })
+  }, { from: from.id })
   if (nudge?.id) ctx.db.kvSet(graduateKey(nudge.id), { to: to.id, from: from.id })
 }
 

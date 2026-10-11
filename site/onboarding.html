@@ -207,10 +207,12 @@ const authorEl = document.getElementById('author')
 try { authorEl.value = localStorage.getItem('flow:author') || '' } catch {}
 authorEl.addEventListener('input', () => { try { localStorage.setItem('flow:author', authorEl.value) } catch {} })
 let comments = [], online = false
+const adminToken = new URLSearchParams(location.search).get('token')
+const hdrs = extra => ({ ...(adminToken ? { 'x-admin-token': adminToken } : {}), ...(extra || {}) })
 const localLoad = () => { try { return JSON.parse(localStorage.getItem('flow:comments') || '[]') } catch { return [] } }
 const localSave = () => { try { localStorage.setItem('flow:comments', JSON.stringify(comments)) } catch {} }
 async function load() {
-  try { const r = await fetch('/api/flow-comments'); if (!r.ok) throw 0; comments = await r.json(); online = true; status.textContent = 'comments saved to the node' }
+  try { const r = await fetch('/api/flow-comments', { headers: hdrs() }); if (!r.ok) throw 0; comments = await r.json(); online = true; status.textContent = 'comments saved to the node' }
   catch { comments = localLoad(); online = false; status.textContent = 'offline: comments stay in this browser, use export' }
   render()
 }
@@ -225,13 +227,13 @@ document.addEventListener('submit', async e => {
   const node = e.target.closest('.node').dataset.node, input = e.target.querySelector('input')
   const c = { id: Date.now().toString(36), node, text: input.value.trim(), author: authorEl.value.trim() || 'anon', at: new Date().toISOString() }
   if (!c.text) return
-  if (online) { try { const r = await fetch('/api/flow-comments', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(c) }); Object.assign(c, await r.json()) } catch { online = false } }
+  if (online) { try { const r = await fetch('/api/flow-comments', { method: 'POST', headers: hdrs({ 'content-type': 'application/json' }), body: JSON.stringify(c) }); Object.assign(c, await r.json()) } catch { online = false } }
   comments.push(c); if (!online) localSave(); input.value = ''; render()
 })
 document.addEventListener('click', async e => {
   const x = e.target.closest('.x'); if (!x) return
   comments = comments.filter(c => c.id !== x.dataset.id)
-  if (online) fetch(`/api/flow-comments/${x.dataset.id}`, { method: 'DELETE' }).catch(() => {}); else localSave()
+  if (online) fetch(`/api/flow-comments/${x.dataset.id}`, { method: 'DELETE', headers: hdrs() }).catch(() => {}); else localSave()
   render()
 })
 document.getElementById('export').addEventListener('click', async () => {

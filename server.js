@@ -1,7 +1,7 @@
 import express from 'express'
 import { readFileSync } from 'node:fs'
 import { buildContext } from './core/context.js'
-import { mountAdmin } from './core/admin.js'
+import { mountAdmin, devOk } from './core/admin.js'
 import { startCron } from './core/cron.js'
 import { log } from './core/log.js'
 
@@ -50,7 +50,7 @@ app.post('/app/register', async (req, res) => {
   const { inviteCode, displayName, device } = req.body || {}
   const inv = inviteCode && ctx.people.peekInvite(inviteCode)
   const p = ctx.people.create({ displayName: displayName || inv?.invitee_name || 'New person' })
-  ctx.people.update(p.id, { onboarding: { step: 'sources', via: 'app', pendingInvite: inv ? inviteCode : null } })
+  ctx.people.update(p.id, { onboarding: { step: 'done', via: 'app', pendingInvite: inv ? inviteCode : null } })   // the app is their source; digests and suggestions are gated on 'done'
   if (inv) ctx.people.acceptInvite(inviteCode, p.id)
   const sc = ctx.sources.connect(p.id, 'opportuneApp', { device: device || {} })
   const { manageUrl } = await import('./web/routes.js')
@@ -68,16 +68,17 @@ app.get('/api/app/state', async (req, res) => {
   const remaining = l => (l.until ? Math.max(0, Math.round((new Date(l.until) - Date.now()) / 60000)) : null)
   const strength = l => (l.state !== 'open' ? null : l.until == null ? 'steady' : remaining(l) > 45 ? 'strong' : remaining(l) > 10 ? 'fading' : 'last-call')
   const mine = porchlight(ctx, me), myPres = presence(ctx, me.id)
+  // sorted by open-first then distance server-side; the exact metres never leave (a band is enough, and it would let a friend triangulate a home)
   const friends = ctx.people.connections(me.id).filter(f => !f.remote && f.onboarding?.step !== 'shadow').map(f => {
     const rel = f.incoming   // what they let me do
     if (!rel?.effectiveGrants?.askDropin) return null
     const l = porchlight(ctx, f), pres = presence(ctx, f.id)
     const d = myPres.loc && pres.home ? ctx.geo.distanceM(myPres.loc.data, pres.home) : null
-    return { id: f.id, name: f.display_name, wantMore: !!f.outgoing?.want_more, theyWantMore: !!f.incoming?.want_more,
+    return { d, row: { id: f.id, name: f.display_name, wantMore: !!f.outgoing?.want_more, theyWantMore: !!f.incoming?.want_more,
       porchlight: { state: l.state, source: l.source, until: l.until || null, remainingMin: remaining(l), strength: strength(l), note: l.note || null },
       home: pres.isHome ? 'home' : pres.loc ? 'out' : 'unknown', hasHome: !!pres.home,
-      distanceBand: d == null ? null : d < 500 ? 'a block away' : d < 2000 ? 'nearby' : d < 8000 ? 'across town' : 'far', distanceM: d == null ? null : Math.round(d) }
-  }).filter(Boolean).sort((a, b) => (a.porchlight.state === 'open' ? 0 : 1) - (b.porchlight.state === 'open' ? 0 : 1) || (a.distanceM ?? 1e9) - (b.distanceM ?? 1e9))
+      distanceBand: d == null ? null : d < 500 ? 'a block away' : d < 2000 ? 'nearby' : d < 8000 ? 'across town' : 'far' } }
+  }).filter(Boolean).sort((a, b) => (a.row.porchlight.state === 'open' ? 0 : 1) - (b.row.porchlight.state === 'open' ? 0 : 1) || (a.d ?? 1e9) - (b.d ?? 1e9)).map(x => x.row)
   res.json({ me: { id: me.id, name: me.display_name, hasHome: !!myPres.home, atHome: myPres.isHome, onboarding: me.onboarding?.step || null,
       porchlight: { state: mine.state, source: mine.source, until: mine.until || null, remainingMin: remaining(mine), strength: strength(mine), note: mine.note || null } },
     friends, nudges: ctx.nudges.recent(me.id, 20), now: new Date().toISOString() })
@@ -95,16 +96,19 @@ app.post('/app/claim', async (req, res) => {
   res.json({ personId: p.id, displayName: p.display_name, ingestUrl: ctx.sources.ingestUrl(sc), manageUrl: manageUrl(ctx, p.id), telegramLink: null, inviter: null })
 })
 
-// ---- inline comments for the onboarding flow page (site/onboarding.html); kv-backed, no auth, dev only ----
-app.get('/api/flow-comments', (_req, res) => res.json(ctx.db.kvGet('flowComments') || []))
-app.post('/api/flow-comments', (req, res) => {
+// ---- dev / admin-only routes: open when NODE_ENV !== 'production', else need the admin token (?token= or x-admin-token) ----
+const dev = (req, res, next) => (devOk(ctx, req) ? next() : res.status(401).json({ error: 'admin token required' }))
+
+// inline comments for the onboarding flow page (site/onboarding.html); kv-backed. The page forwards ?token= as x-admin-token.
+app.get('/api/flow-comments', dev, (_req, res) => res.json(ctx.db.kvGet('flowComments') || []))
+app.post('/api/flow-comments', dev, (req, res) => {
   const list = ctx.db.kvGet('flowComments') || []
   const { node, text, author } = req.body || {}
   if (!node || !text) return res.status(400).json({ error: 'node and text required' })
   const c = { id: Date.now().toString(36), node, text: String(text).slice(0, 2000), author: String(author || 'anon').slice(0, 40), at: new Date().toISOString() }
   list.push(c); ctx.db.kvSet('flowComments', list); res.json(c)
 })
-app.delete('/api/flow-comments/:id', (req, res) => { ctx.db.kvSet('flowComments', (ctx.db.kvGet('flowComments') || []).filter(c => c.id !== req.params.id)); res.json({ ok: true }) })
+app.delete('/api/flow-comments/:id', dev, (req, res) => { ctx.db.kvSet('flowComments', (ctx.db.kvGet('flowComments') || []).filter(c => c.id !== req.params.id)); res.json({ ok: true }) })
 
 // ---- invites land here; hand off to a channel's onboarding ----
 app.get('/i/:code', (req, res) => {
@@ -122,8 +126,8 @@ mountAdmin(app, ctx)
 
 // ---- local/debug API ----
 app.get('/api/health', (_req, res) => res.json({ ok: true, people: ctx.people.all().length, llm: ctx.llm.enabled }))
-app.get('/api/people', (_req, res) => res.json(ctx.people.all().map(p => ({ id: p.id, name: p.display_name, friends: ctx.people.friendsOf(p.id).length }))))
-app.post('/api/dev/opportunity', async (req, res) => res.json(await ctx.opportunities.add('dev', req.body)))
+app.get('/api/people', dev, (_req, res) => res.json(ctx.people.all().map(p => ({ id: p.id, name: p.display_name, friends: ctx.people.friendsOf(p.id).length }))))
+app.post('/api/dev/opportunity', dev, async (req, res) => res.json(await ctx.opportunities.add('dev', req.body)))
 
 // ---- web management UI (web/routes.js is built as an addon; optional) ----
 try { const { mountWeb } = await import('./web/routes.js'); await mountWeb(app, ctx) } catch (e) { if (e.code !== 'ERR_MODULE_NOT_FOUND') L.error('web routes failed:', e.message) }

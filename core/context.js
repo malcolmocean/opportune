@@ -10,7 +10,7 @@ import { makeQuery } from './query.js'
 import { makeFederation } from './federation.js'
 import { makeAgent } from './agent.js'
 import { makeSources } from './sources.js'
-import { makeDigest } from './cron.js'
+import { makeDigest, settingsHint } from './cron.js'
 import { makeLlm } from './llm.js'
 import { log } from './log.js'
 import * as geo from './geo.js'
@@ -38,7 +38,7 @@ export async function buildContext(env = process.env, { dbPath } = {}) {
     db.kvSet(key, Date.now())
     const srcId = (suggest.plugin || '').split('/')[1]
     const src = ctx.plugins.sources[srcId]
-    const how = src ? `Connect "${src.name}" with /sources.` : suggest.repo ? `Your node doesn't have it yet: ${suggest.repo}` : (suggest.setup || '')
+    const how = src ? `Connect "${src.name}" ${await settingsHint(ctx, to.id, '/sources')}.` : suggest.repo ? `Your node doesn't have it yet: ${suggest.repo}` : (suggest.setup || '')
     await ctx.nudges.send(to.id, { text: `${why || `A friend's agent asked about ${kind}`}, but I couldn't answer: ${suggest.setup || 'missing data'}. ${how}`, actions: [{ key: 'no', label: 'Not now' }] })
   })
   for (const p of [...Object.values(ctx.plugins.sources), ...Object.values(ctx.plugins.triggers), ...Object.values(ctx.plugins.queries)]) {

@@ -1,5 +1,6 @@
-// The user-facing app: GET /app, POST /api/app/session, POST /api/app/friends/:id/dropin (web/routes.js).
-// /api/app/state and /app/register|claim live in server.js and are covered by their own tests.
+// The user-facing app: GET /app, POST /api/app/session, PATCH /api/app/me, POST /api/app/invites,
+// POST /api/app/friends/:id/dropin (web/routes.js). /api/app/state and /app/register|claim live in server.js
+// and are covered by their own tests.
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
@@ -44,6 +45,11 @@ test('GET /app serves the app shell; its scripts parse', async () => {
   assert.match(r.body, /\/web\/app\.webmanifest/)
   assert.match(r.body, /\/web\/app\.js/)
   assert.match(r.body, /theme-color" content="#090b22"/)
+  for (const id of ['s-home', 's-nudges', 's-review', 's-people', 's-sources', 's-windows', 's-map', 's-settings']) assert.ok(r.body.includes(`id="${id}"`), id)
+  assert.ok(!r.body.includes('iframe') && !r.body.includes('manage'), 'nothing embedded from the removed management page')
+  const js = readFileSync('web/app.js', 'utf8')
+  assert.ok(!js.includes('/web/manage') && !js.includes('iframe'), 'the app talks to /api/manage directly')
+  for (const route of ['/api/app/invites', '/api/app/me', '/app/email/request', '/api/app/email', "api('/me')", "api('/sources'", "api('/policy'", '/invite-link', '/decisions/']) assert.ok(js.includes(route), route)
   for (const f of ['web/app.js', 'web/app/bridge.js', 'web/app/lantern.js']) execFileSync(process.execPath, ['--check', f])
   const manifest = JSON.parse(readFileSync('web/app.webmanifest', 'utf8'))
   assert.equal(manifest.start_url, '/app')
@@ -61,7 +67,9 @@ test('POST /api/app/session needs a token and gives the app its ingest URL (conn
   assert.equal(r.body.me.id, me.id)
   assert.equal(r.body.me.displayName, 'Jess')
   assert.match(r.body.ingestUrl, /^http:\/\/node\.test\/ingest\/opportuneApp\/[A-Za-z0-9_-]+$/)
-  assert.match(r.body.manageUrl, /^http:\/\/node\.test\/web\/manage\?token=/)
+  assert.match(r.body.manageUrl, /^http:\/\/node\.test\/app\?token=/, 'the app link, not the old page')
+  assert.deepEqual(r.body.declinedSources, [])
+  assert.equal(r.body.me.email, null)
   assert.equal(r.body.telegramLinked, false)
   assert.equal(r.body.telegramLink, null, 'no bot configured in tests')
   assert.equal(r.body.pushBound, false)
@@ -77,6 +85,47 @@ test('POST /api/app/session needs a token and gives the app its ingest URL (conn
   // a location source shows up as locationPostUrl, for Overland users
   ctx.sources.connect(me.id, 'locationPost', { app: 'Overland (iOS)' })
   assert.match((await j('/api/app/session', { method: 'POST' })).body.locationPostUrl, /\/ingest\/locationPost\//)
+})
+
+test('session shows a verified email once one is bound', async () => {
+  ctx.people.bind(me.id, 'email', 'Jess@Example.com')
+  const r = await j('/api/app/session', { method: 'POST' })
+  assert.equal(r.body.me.email, 'jess@example.com')
+})
+
+test('PATCH /api/app/me stores declined sources (known ids only, deduped) and session echoes them', async () => {
+  assert.equal((await j('/api/app/me', { method: 'PATCH', token: null, body: { declinedSources: [] } })).status, 401)
+  assert.equal((await j('/api/app/me', { method: 'PATCH', body: {} })).status, 400)
+  assert.equal((await j('/api/app/me', { method: 'PATCH', body: { declinedSources: 'tweets' } })).status, 400)
+  assert.equal((await j('/api/app/me', { method: 'PATCH', body: { declinedSources: [1] } })).status, 400)
+  let r = await j('/api/app/me', { method: 'PATCH', body: { declinedSources: ['tweets', 'matrix', 'tweets', 'notASource'] } })
+  assert.equal(r.status, 200)
+  assert.deepEqual(r.body.declinedSources, ['tweets', 'matrix'])
+  assert.deepEqual((await j('/api/app/session', { method: 'POST' })).body.declinedSources, ['tweets', 'matrix'])
+  assert.deepEqual(ctx.db.kvGet(`declined:${me.id}`), ['tweets', 'matrix'])
+  r = await j('/api/app/me', { method: 'PATCH', body: { declinedSources: [] } })
+  assert.deepEqual(r.body.declinedSources, [])
+  // the other person is untouched
+  assert.equal(ctx.db.kvGet(`declined:${friend.id}`), undefined)
+})
+
+test('POST /api/app/invites makes a one-time link for a named person, wantMore on by default', async () => {
+  assert.equal((await j('/api/app/invites', { method: 'POST', token: null, body: { name: 'Sam' } })).status, 401)
+  assert.equal((await j('/api/app/invites', { method: 'POST', body: {} })).status, 400)
+  assert.equal((await j('/api/app/invites', { method: 'POST', body: { name: '   ' } })).status, 400)
+  let r = await j('/api/app/invites', { method: 'POST', body: { name: ' Sam <b>O\'Neil</b> ' } })
+  assert.equal(r.status, 200)
+  assert.equal(r.body.name, 'Sam bO\'Neilb')
+  assert.equal(r.body.wantMore, true)
+  assert.match(r.body.url, /^http:\/\/node\.test\/i\/[A-Za-z0-9_-]+$/)
+  let inv = ctx.people.peekInvite(r.body.code)
+  assert.equal(inv.inviter_id, me.id)
+  assert.equal(inv.invitee_name, 'Sam bO\'Neilb')
+  assert.equal(inv.want_more, 1)
+  r = await j('/api/app/invites', { method: 'POST', body: { name: 'Pat', wantMore: false } })
+  inv = ctx.people.peekInvite(r.body.code)
+  assert.equal(inv.want_more, 0)
+  assert.equal(r.body.wantMore, false)
 })
 
 test('POST /api/app/friends/:id/dropin asks their agent and relays the structured answer', async () => {

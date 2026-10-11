@@ -6,8 +6,8 @@ import { fileURLToPath } from 'node:url'
 import { TIER_DEFAULTS } from '../core/people.js'
 import { isValidTz } from '../core/geo.js'
 
-// Web management surface: a magic-link page where a person manages friends, sources,
-// reviews the judge's calls, and sees a trusted-tier map. Telegram is bad at lists.
+// Web surface: /app (web/app.js) is the whole UI: porchlight, nudges, people, sources, review, map, settings.
+// /api/manage/* and /api/app/* are its JSON, authenticated by one token (a manage token or the app's own ingest token).
 
 const here = dirname(fileURLToPath(import.meta.url))
 const TIERS = ['acquaintance', 'friend', 'trusted']
@@ -16,9 +16,9 @@ const POLICY_KEYS = ['quietHours', 'maxNudgesPerDay', 'dropinDefault', 'dropinWi
 const LOCATION_WINDOW_MS = 3 * 3600e3
 const isShadow = p => p?.onboarding?.step === 'shadow'
 
-// Generate (or reuse) a manage token for a person and return the page URL.
+// Generate (or reuse) a manage token for a person.
 // Stored twice in kv: manage:<token> → { personId, created } and manage:person:<id> → token.
-export function manageUrl(ctx, personId) {
+export function manageToken(ctx, personId) {
   const person = ctx.people.get(personId)
   if (!person) throw new Error('no such person')
   let token = ctx.db.kvGet(`manage:person:${personId}`)
@@ -27,8 +27,12 @@ export function manageUrl(ctx, personId) {
     ctx.db.kvSet(`manage:${token}`, { personId, created: new Date().toISOString() })
     ctx.db.kvSet(`manage:person:${personId}`, token)
   }
-  return `${ctx.people.nodeUrl}/web/manage?token=${token}`
+  return token
 }
+// The app, signed in: /app?token=<manage token>[#screen]. The app reads ?token= once and keeps it.
+export const appUrl = (ctx, personId, hash = '') => `${ctx.people.nodeUrl}/app?token=${manageToken(ctx, personId)}${hash ? `#${hash}` : ''}`
+// Legacy name and shape (links already sent out, cron hints): /web/manage?token= redirects to /app?token=.
+export const manageUrl = (ctx, personId) => `${ctx.people.nodeUrl}/web/manage?token=${manageToken(ctx, personId)}`
 
 // Resolve a token to a local, non-shadow person: a manage token, or the opportune app's own ingest token.
 // Other sources' ingest tokens (OwnTracks, Overland, ...) sit in third-party apps and don't carry manage rights.
@@ -45,9 +49,10 @@ export function personForToken(ctx, token) {
 export async function mountWeb(app, ctx) {
   const L = ctx.log('web')
   const page = name => (_req, res) => res.type('html').send(readFileSync(join(here, name), 'utf8'))
-  app.get('/web/manage', page('manage.html'))
   app.get('/web/map', page('map.html'))
   app.get('/app', page('app.html'))   // the user-facing app (web/app.js); see docs/APP-BRIDGE.md
+  // the old management page is folded into the app; old links (and #people/#review/#sources hashes, which browsers keep across a redirect) still land
+  app.get('/web/manage', (req, res) => res.redirect(302, `/app${req.query.token ? `?token=${encodeURIComponent(String(req.query.token))}` : ''}`))
 
   const auth = (req, res, next) => {
     const token = req.get('x-manage-token') || req.query.token
@@ -186,10 +191,12 @@ export async function mountWeb(app, ctx) {
     const m = ctx.plugins.sources[sourceId]
     if (!m) return res.status(404).json({ error: 'unknown source' })
     if (config != null && typeof config !== 'object') return res.status(400).json({ error: 'config must be an object' })
+    // "Change settings" on a connected source resubmits the form; the API never echoes secrets, so a blank secret means keep the one we have
+    const existing = ctx.sources.forPerson(req.me.id).find(s => s.source_id === sourceId)
     const cfg = {}
     for (const step of m.setup || []) {
       let v = config?.[step.key]
-      if (v == null || v === '') continue
+      if (v == null || v === '') { if (step.type === 'secret' && existing?.config?.[step.key] != null) cfg[step.key] = existing.config[step.key]; continue }
       if (step.type === 'choice' && !step.choices?.includes(v)) return res.status(400).json({ error: `${step.key}: pick one of ${step.choices.join(', ')}` })
       if (step.parse && typeof v === 'string') { try { v = step.parse(v) } catch (e) { return res.status(400).json({ error: `${step.key}: ${e.message}` }) } }
       cfg[step.key] = v
@@ -242,9 +249,11 @@ export async function mountWeb(app, ctx) {
     const telegramLinked = identities.some(i => i.channel === 'telegram')
     const loc = mine().find(s => s.source_id === 'locationPost' && s.enabled)
     res.json({
-      me: { id: me.id, displayName: me.display_name, tz: me.tz, nodeUrl: me.node_url || ctx.people.nodeUrl, onboarding: me.onboarding?.step || null },
+      me: { id: me.id, displayName: me.display_name, tz: me.tz, nodeUrl: me.node_url || ctx.people.nodeUrl, onboarding: me.onboarding?.step || null,
+        email: identities.find(i => i.channel === 'email')?.external_id || null },
       ingestUrl: ctx.sources.ingestUrl(sc),
-      manageUrl: manageUrl(ctx, me.id),
+      manageUrl: appUrl(ctx, me.id),
+      declinedSources: declined(me.id),
       telegramLinked,
       telegramLink: telegramLinked ? null : ctx.plugins.channels.telegram?.deepLink?.(ctx, `link-${sc.token}`) || null,
       pushBound: identities.some(i => i.channel === 'fcm'),
@@ -264,9 +273,31 @@ export async function mountWeb(app, ctx) {
     res.json({ friend: { id: f.id, name: f.display_name }, answer: ans.answer, reason: ans.reason || null, text: ans.text || null, confidence: ans.confidence ?? null, revealed: ans.revealed || {} })
   })
 
+  // Sources the person has said "not for me" to: hidden on the Sources screen and out of the progress denominator. kv, not a column.
+  appApi.patch('/me', (req, res) => {
+    const b = req.body || {}
+    if (!('declinedSources' in b)) return res.status(400).json({ error: 'nothing to change' })
+    if (!Array.isArray(b.declinedSources) || b.declinedSources.some(x => typeof x !== 'string')) return res.status(400).json({ error: 'declinedSources must be an array of source ids' })
+    const ids = [...new Set(b.declinedSources.filter(x => ctx.plugins.sources[x]))]
+    ctx.db.kvSet(`declined:${req.me.id}`, ids)
+    res.json({ declinedSources: ids })
+  })
+
+  // "+ invite a friend" in the app: a one-time link that says I want to see more of them. Same as Telegram's /invite.
+  appApi.post('/invites', (req, res) => {
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim().replace(/[^\w\s'.-]/g, '').slice(0, 40) : ''
+    if (!name) return res.status(400).json({ error: 'a name, so the link can say who it\'s for' })
+    const wantMore = req.body?.wantMore == null ? true : !!req.body.wantMore
+    const inv = ctx.people.invite(req.me.id, { inviteeName: name, wantMore })
+    L.info(`${req.me.display_name} made an invite link for ${name} via /app`)
+    res.json({ name, wantMore, ...inv })
+  })
+
   appApi.use(onError)
   app.use('/api/app', appApi)
-  L.info('manage UI at /web/manage, app at /app')
+  L.info('app at /app')
+
+  function declined(personId) { const v = ctx.db.kvGet(`declined:${personId}`); return Array.isArray(v) ? v : [] }
 }
 
 const byName = (a, b) => (a.displayName || '').localeCompare(b.displayName || '')

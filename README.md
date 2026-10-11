@@ -28,8 +28,9 @@ pnpm seed         # two fake people and a party, for poking at it
 pnpm test
 ```
 
-Then open your bot in Telegram, `/start`. Onboarding is six messages. `/invite Eileen`
-makes a one-time link that tells Eileen you want to see more of her.
+Then open `http://localhost:3400/app` (or your bot in Telegram, `/start`; onboarding is six
+messages). People → "+ Invite" (or `/invite Eileen`) makes a one-time link that tells Eileen
+you want to see more of her.
 
 ## Email sign-in (Resend)
 
@@ -68,7 +69,7 @@ bot token at a time, so stop `pnpm dev` locally before deploying.
 | `triggers/` | deterministic detectors: nearby, co-attendance, porchlight proximity, event interest, standing slot, in-town, contact joined |
 | `queries/` | what a friend's agent may ask yours: availability, dropin, plans, whereabouts |
 | `channels/` | telegram, fcm (Android push), email (magic-link sign-in via Resend) |
-| `web/` | magic-link management page: friends, grants, sources, decision review, trusted-tier map |
+| `web/` | the app at `/app`: porchlight, nudges, people (tiers, grants, invites), sources, decision review, trusted-tier map, settings. `/manage` in Telegram gives a sign-in link |
 | `apps/android` | location source + push + porchlight toggle |
 | `docs/PLUGINS.md` | how to write any of the above |
 

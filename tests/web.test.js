@@ -2,7 +2,7 @@ import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import express from 'express'
 import { buildContext } from '../core/context.js'
-import { mountWeb, manageUrl, personForToken } from '../web/routes.js'
+import { mountWeb, manageUrl, appUrl, manageToken, personForToken } from '../web/routes.js'
 
 let ctx, server, base, me, friend, shadow, remote, token
 const j = async (path, { method = 'GET', body, token: t = token, raw = false } = {}) => {
@@ -32,20 +32,27 @@ before(async () => {
 })
 after(() => server.close())
 
-test('manageUrl points at /web/manage and reuses the token', () => {
+test('appUrl / manageUrl share one token per person; appUrl takes a screen hash', () => {
   const url = manageUrl(ctx, me.id)
   assert.match(url, /^http:\/\/node\.test\/web\/manage\?token=/)
   assert.equal(manageUrl(ctx, me.id), url)
+  assert.equal(manageToken(ctx, me.id), token)
+  assert.equal(appUrl(ctx, me.id), `http://node.test/app?token=${token}`)
+  assert.equal(appUrl(ctx, me.id, 'review'), `http://node.test/app?token=${token}#review`)
   assert.equal(personForToken(ctx, token).id, me.id)
 })
 
-test('manage page and map page are served', async () => {
-  const r = await j('/web/manage', { raw: true, token: null })
-  assert.equal(r.status, 200)
-  assert.match(r.body, /<title>opportune<\/title>/)
+test('the old manage page redirects into the app with the token; the map page is served on app.css', async () => {
+  const r = await fetch(`${base}/web/manage?token=${token}`, { redirect: 'manual' })
+  assert.equal(r.status, 302)
+  assert.equal(r.headers.get('location'), `/app?token=${token}`)
+  const bare = await fetch(`${base}/web/manage`, { redirect: 'manual' })
+  assert.equal(bare.headers.get('location'), '/app')
   const m = await j('/web/map', { raw: true, token: null })
   assert.equal(m.status, 200)
   assert.match(m.body, /map\.js/)
+  assert.match(m.body, /\/web\/app\.css/)
+  assert.ok(!m.body.includes('/web/manage'), 'no links back to the removed page')
 })
 
 test('api requires a valid token; shadow and remote tokens are refused', async () => {
@@ -185,6 +192,21 @@ test('POST sources connects and returns the ingest url; setup parse() is applied
   assert.match(r.body.ingestUrl, /^http:\/\/node\.test\/ingest\/locationPost\//)
   assert.equal((await j('/api/manage/sources', { method: 'POST', body: { sourceId: 'locationPost', config: { app: 'Pigeon' } } })).status, 400)
   assert.equal((await j('/api/manage/sources', { method: 'POST', body: { sourceId: 'nope' } })).status, 404)
+})
+
+test('POST sources again with a blank secret keeps the stored one (the form shows "unchanged"); other fields are replaced', async () => {
+  let r = await j('/api/manage/sources', { method: 'POST', body: { sourceId: 'gmailRsvp', config: { email: 'jess@gmail.com', appPassword: 'abcd efgh', since: '10' } } })
+  assert.equal(r.status, 200)
+  assert.equal(r.body.config.appPassword, '••••••', 'redacted on the way out')
+  const stored = () => ctx.sources.forPerson(me.id).find(s => s.source_id === 'gmailRsvp').config
+  assert.equal(stored().appPassword, 'abcdefgh')
+  r = await j('/api/manage/sources', { method: 'POST', body: { sourceId: 'gmailRsvp', config: { email: 'jess2@gmail.com', appPassword: '' } } })
+  assert.equal(r.status, 200)
+  assert.equal(stored().appPassword, 'abcdefgh', 'blank secret = unchanged')
+  assert.equal(stored().email, 'jess2@gmail.com')
+  assert.equal(stored().since, undefined, 'a blank optional non-secret is cleared')
+  r = await j('/api/manage/sources', { method: 'POST', body: { sourceId: 'gmailRsvp', config: { email: 'jess2@gmail.com', appPassword: 'new one' } } })
+  assert.equal(stored().appPassword, 'newone')
 })
 
 test('GET /map lists only friends who grant seeLocationLive to me, with fresh locations', async () => {

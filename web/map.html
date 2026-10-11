@@ -3,23 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="light dark">
-<meta name="theme-color" content="#2380e4">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#090b22">
 <title>opportune map</title>
 <link rel="icon" type="image/png" href="/web/icon.png">
 <link rel="apple-touch-icon" href="/web/icon.png">
-<link rel="stylesheet" href="/web/manage.css">
+<link rel="stylesheet" href="/web/app.css">
 <style>
-  body { height: 100dvh }
-  #mapEl { position: fixed; inset: 0; height: auto }
+  body { height: 100dvh; padding: 0 }
+  #mapEl { position: fixed; inset: 0; height: auto; background: var(--card) }
   .back { position: fixed; top: max(12px, env(safe-area-inset-top)); left: 12px; z-index: 400 }
-  .map-legend { position: fixed }
+  .map-legend { position: fixed; left: 16px; bottom: 16px; z-index: 400; margin: 0; background: var(--card); padding: 8px 12px; border-radius: 10px; box-shadow: var(--shadow); max-width: calc(100% - 32px) }
+  .gate { position: fixed; inset: 0; background: var(--bg); z-index: 500 }
   .leaflet-top.leaflet-left { top: calc(max(12px, env(safe-area-inset-top)) + 40px) }
 </style>
 </head>
 <body>
 <div id="mapEl" class="map"></div>
-<a class="btn small back" id="back" href="/web/manage">← manage</a>
+<a class="btn small ghost back" id="back" href="/app#map">← app</a>
 <div class="map-legend" id="legend">Loading…</div>
 <div class="gate" id="gate" hidden><h1>opportune</h1><p id="gateMsg"></p></div>
 <script type="module">
@@ -27,14 +28,14 @@
   const token = tokenFromPage()
   const gate = document.getElementById('gate'), msg = document.getElementById('gateMsg')
   const fail = m => { msg.textContent = m; gate.hidden = false }
-  if (!token) fail('This page needs a link from your agent.')
+  if (!token) fail('This page needs a link from the app (Settings → Map).')
   else {
-    document.getElementById('back').href = `/web/manage?token=${encodeURIComponent(token)}#map`
+    document.getElementById('back').href = `/app?token=${encodeURIComponent(token)}#map`
     try {
       const data = await fetchMap(token)
       const h = await mountMap(document.getElementById('mapEl'), data, { legendEl: document.getElementById('legend') })
       setInterval(async () => { try { h.update(await fetchMap(token)) } catch {} }, 60e3)
-    } catch (e) { fail(e.status === 401 ? 'That link is not valid any more. Ask your agent for a fresh one.' : e.message) }
+    } catch (e) { fail(e.status === 401 ? 'That link is not valid any more. Open the app and sign in again.' : e.message) }
   }
 </script>
 </body>

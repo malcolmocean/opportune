@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { Bot, InlineKeyboard } from 'grammy'
-import { manageUrl } from '../../web/routes.js'
+import { appUrl } from '../../web/routes.js'
 
 // Telegram: onboarding, nudges with action buttons, and chat with your agent.
 let bot, me
@@ -79,7 +79,7 @@ export const HELP_TEXT = [
   '/home — share your home location for drop-ins',
   '/phone — share your number so friends\' contacts can find you',
   '/review — rate my recent calls',
-  '/manage — settings page: friends, grants, sources, map',
+  '/manage — a private sign-in link for the app: people, sources, settings, map',
   '/me — what I know about you right now',
 ].join('\n')
 
@@ -103,7 +103,7 @@ export default {
       if (code?.startsWith('link-')) {
         const sc = ctx.sources.byToken(code.slice(5))
         if (!sc) return c.reply('That link has expired. Open the app and tap "Link Telegram" again.')
-        if (p && p.id !== sc.person_id) return c.reply(`This Telegram account is already set up as ${p.display_name}. Use the app's manage page to merge, or start fresh in the app.`)
+        if (p && p.id !== sc.person_id) return c.reply(`This Telegram account is already set up as ${p.display_name}. To use that account in the app, sign out there and link with a code from /sources; or start fresh in the app.`)
         ctx.people.bind(sc.person_id, 'telegram', c.from.id, { username: c.from.username })
         p = ctx.people.get(sc.person_id)
         const step = p.onboarding?.step
@@ -130,14 +130,14 @@ export default {
     })
 
     bot.command('help', c => c.reply(HELP_TEXT))
-    bot.command('manage', c => { const p = whoami(c); if (!p) return; c.reply(`Your settings page (private link, don't forward it):\n${manageUrl(ctx, p.id)}`) })
+    bot.command('manage', c => { const p = whoami(c); if (!p) return; c.reply(`Your app (private sign-in link, don't forward it):\n${appUrl(ctx, p.id)}\n\nPeople, sources, the judge's calls, the map and settings all live there.`) })
 
     bot.command('whosaround', async c => { const p = whoami(c); if (!p) return; await c.replyWithChatAction('typing'); c.reply(await ctx.agent.chat(p.id, `Who's around ${c.match || 'this evening'}? Give me a shortlist.`)) })
     bot.command('me', async c => { const p = whoami(c); if (!p) return; const obs = ctx.observations.recent(p.id, { limit: 8 }); c.reply(obs.length ? obs.map(o => `${o.kind} ${o.at.slice(0, 16)} ${JSON.stringify(o.data).slice(0, 120)}`).join('\n') : 'Nothing yet. /sources to connect something.') })
     bot.command('friends', async c => {
       const p = whoami(c); if (!p) return
       const fs = ctx.people.friendsOf(p.id)
-      c.reply(fs.length ? fs.map(f => `${f.want_more ? '★' : '·'} ${f.display_name} (${f.tier}${f.remote ? ', remote' : ''})${f.note ? ` — ${f.note}` : ''}`).join('\n') + `\n\n★ = you want more of them. Tell me to change any of this, or edit tiers and grants here (private link): ${manageUrl(ctx, p.id)}#people` : 'No one yet. /invite Name to make a link.')
+      c.reply(fs.length ? fs.map(f => `${f.want_more ? '★' : '·'} ${f.display_name} (${f.tier}${f.remote ? ', remote' : ''})${f.note ? ` — ${f.note}` : ''}`).join('\n') + `\n\n★ = you want more of them. Tell me to change any of this, or edit tiers and grants in the app (private link): ${appUrl(ctx, p.id, 'people')}` : 'No one yet. /invite Name to make a link.')
     })
     bot.command('invite', async c => {
       const p = whoami(c); if (!p) return
@@ -178,7 +178,7 @@ export default {
       const p = whoami(c); if (!p) return
       const rows = ctx.db.all(`select d.id, d.verdict, d.reasoning, d.rating, o.summary from decisions d left join opportunities o on o.id = d.opportunity_id where d.person_id = ? order by d.created_at desc limit 6`, p.id)
       if (!rows.length) return c.reply('No judgement calls yet.')
-      await c.reply(`Full history (private link): ${manageUrl(ctx, p.id)}#review`)
+      await c.reply(`Full history, in the app (private link): ${appUrl(ctx, p.id, 'review')}`)
       for (const r of rows) {
         const { text, buttons } = reviewMessage(r)
         const kb = new InlineKeyboard(); for (const b of buttons) kb.text(b.label, b.data)
@@ -270,7 +270,7 @@ async function advance(ctx, c, p, step) {
   if (step === 'porchlight') return c.reply(`Drop-ins at your place: when are they generally welcome?`, { reply_markup: new InlineKeyboard().text('Weekday evenings', 'ob:pl:evenings').text('Weekends', 'ob:pl:weekends').row().text('Ask me each time', 'ob:pl:ask').text('Not really', 'ob:pl:closed') })
   if (step === 'done') {
     ctx.people.update(p.id, { onboarding: { step: 'done' } })
-    return c.reply(`That's it. I'll stay quiet unless something's worth it, and each morning I'll show you what I kept quiet about so you can correct me.\n\nTry: "who's around tonight?" or "I'm home and open till 9".\n\nOptional, whenever: /home (or I'll infer it from where your phone sleeps), /phone (so friends' contacts can find you), /manage for tiers and grants (it gives you a private link; don't forward it).`)
+    return c.reply(`That's it. I'll stay quiet unless something's worth it, and each morning I'll show you what I kept quiet about so you can correct me.\n\nTry: "who's around tonight?" or "I'm home and open till 9".\n\nOptional, whenever: /home (or I'll infer it from where your phone sleeps), /phone (so friends' contacts can find you), /manage for the app (a private sign-in link; don't forward it): people, sources, settings.`)
   }
 }
 async function onboard(ctx, c, p, text) {

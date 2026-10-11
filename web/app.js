@@ -1,6 +1,7 @@
 // The opportune app. One page: onboarding → home (my porchlight + friends' porchlights) → nudges,
-// with People/Review embedded from the manage page, the map from map.js, and settings.
-// Works in any browser; inside the Android shell it uses window.opportuneNative (web/app/bridge.js).
+// people, sources, the judge's calls, the map (map.js) and settings. All native screens over
+// /api/app/* and /api/manage/* with the one token. Works in any browser; inside the Android shell
+// it uses window.opportuneNative (web/app/bridge.js).
 import { fetchMap, mountMap } from '/web/map.js'
 import { lanternEl } from '/web/app/lantern.js'
 import { isNative, bridge, currentLocation, browserPermissions, onPermissions, onResume, onNudge } from '/web/app/bridge.js'
@@ -29,6 +30,7 @@ let toastT
 const toast = msg => { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => { t.hidden = true }, 2200) }
 const fail = e => toast(e?.message || 'something went wrong')
 const fmtMin = m => (m == null ? '' : m < 1 ? 'less than a minute' : m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}`)
+const ago = m => (m == null ? '' : m < 1 ? 'just now' : m < 60 ? `${m}m ago` : `${Math.round(m / 60)}h ago`)
 const when = iso => {
   const d = new Date(iso), diff = (Date.now() - d) / 60e3
   if (diff < 1) return 'just now'
@@ -36,14 +38,16 @@ const when = iso => {
   if (diff < 24 * 60) return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
   return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
 }
+const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms) } }
 
 // ---------- state ----------
 let token = null       // the one credential: a source token (tail of ingestUrl) or a manage token
 let session = null     // POST /api/app/session
 let state = null       // GET /api/app/state
+let manage = null      // GET /api/manage/me: friends, sources, decisions, nudges, policy (loaded lazily, then kept fresh)
 let perms = null       // native permissions, or the browser's best guess
 let extraNudges = []   // pushed in by the shell while open (onNativeNudge), until the next refresh has them
-let mapHandle = null, frame = null, refreshT = null
+let mapHandle = null, refreshT = null
 
 async function req(url, { method = 'GET', body, auth = true } = {}) {
   const r = await fetch(url, { method, headers: { ...(auth && token ? { 'x-manage-token': token } : {}), ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined })
@@ -51,8 +55,10 @@ async function req(url, { method = 'GET', body, auth = true } = {}) {
   if (!r.ok) throw Object.assign(new Error(data.error || r.statusText || `http ${r.status}`), { status: r.status })
   return data
 }
+const api = (path, opts) => req(`/api/manage${path}`, opts)
 // POST to my ingest URL (same shapes the Android shell posts). Relative, so dev nodes with a different NODE_URL still work.
 const ingest = body => req(new URL(session.ingestUrl, location.href).pathname, { method: 'POST', body, auth: false })
+async function loadManage() { manage = await api('/me'); return manage }
 
 // ---------- theme ----------
 const themePref = () => ls.get('opportune.theme') || 'system'
@@ -62,29 +68,41 @@ function applyTheme() {
   if (p === 'system') delete document.documentElement.dataset.theme
   else document.documentElement.dataset.theme = p
   $('meta[name=theme-color]')?.setAttribute('content', isDark() ? '#090b22' : '#f6f5ff')
-  if (frame?.contentDocument) frame.contentDocument.documentElement.dataset.theme = isDark() ? 'dark' : 'light'
 }
 matchMedia('(prefers-color-scheme: light)').addEventListener?.('change', applyTheme)
 
 // ---------- screens & tabs ----------
 const TABS = ['home', 'nudges', 'people', 'map', 'settings']
-const SCREEN = { onboard: 's-onboard', perms: 's-perms', home: 's-home', nudges: 's-nudges', people: 's-embed', review: 's-embed', map: 's-map', settings: 's-settings' }
+const SCREEN = { onboard: 's-onboard', perms: 's-perms', home: 's-home', nudges: 's-nudges', review: 's-review', people: 's-people', sources: 's-sources', windows: 's-windows', map: 's-map', settings: 's-settings' }
+const PARENT = { review: 'nudges', sources: 'settings', windows: 'settings' }   // sub-screens light up their tab
 let current = null
 function show(name) {
+  if (!(name in SCREEN)) name = 'home'
   current = name
   for (const s of document.querySelectorAll('.screen')) s.hidden = s.id !== SCREEN[name]
-  const tab = name === 'review' ? 'nudges' : name
+  const tab = PARENT[name] || name
   for (const b of document.querySelectorAll('#tabbar [role=tab]')) b.setAttribute('aria-selected', String(b.dataset.tab === tab))
-  if (name in SCREEN && !['onboard', 'perms'].includes(name) && location.hash !== `#${name}`) history.replaceState(null, '', `#${name}`)
+  if (!['onboard', 'perms'].includes(name) && location.hash !== `#${name}`) history.replaceState(null, '', `#${name}`)
   if (name === 'map') renderMap()
   else if (mapHandle) setTimeout(() => mapHandle.map.invalidateSize(), 0)
-  if (name === 'people' || name === 'review') renderEmbed(name)
+  if (name === 'people') withManage(renderPeople)
+  if (name === 'review') withManage(renderReview)
+  if (name === 'sources') withManage(renderSources)
+  if (name === 'windows') withManage(renderWindows)
   if (name === 'settings') renderSettings()
   window.scrollTo({ top: 0 })
 }
-const tabFromHash = () => { const t = location.hash.slice(1); return TABS.includes(t) || t === 'review' ? t : 'home' }
+const tabFromHash = () => { const t = location.hash.slice(1); return TABS.includes(t) || t in PARENT ? t : 'home' }
 $('#tabbar').addEventListener('click', e => { const b = e.target.closest('[role=tab]'); if (b) show(b.dataset.tab) })
 window.addEventListener('hashchange', () => { if (state) show(tabFromHash()) })
+// Screens built from /api/manage/me: render what we have at once (if anything), then again with fresh data.
+function withManage(render) {
+  const name = current
+  if (manage) render()
+  else { const root = $(`#${SCREEN[name]}`); root.replaceChildren(h('div', { class: 'empty' }, 'Loading…')) }
+  loadManage().then(() => { if (current === name) render() }).catch(e => { if (!manage) $(`#${SCREEN[name]}`).replaceChildren(h('div', { class: 'card empty' }, e.message)) })
+}
+const head = (title, back, right) => h('div', { class: 'screen-head' }, h('div', {}, back && h('button', { class: 'back', onclick: () => show(back[1]) }, back[0]), h('h2', {}, title)), right)
 
 // ---------- bottom sheet ----------
 function openSheet(...kids) {
@@ -127,19 +145,29 @@ function renderOnboard(msg) {
   { const e = err(), code = h('input', { type: 'text', class: 'code', name: 'code', placeholder: 'invite code', autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false', maxlength: 24 })
     code.value = invite
     const name = h('input', { type: 'text', name: 'name', placeholder: 'What should friends call you?', autocomplete: 'name' })
-    const form = h('form', { onsubmit: null }, code, name, e, h('button', { type: 'submit', class: 'btn block' }, 'Join'))
+    const form = h('form', {}, code, name, e, h('button', { type: 'submit', class: 'btn block' }, 'Join'))
     form.addEventListener('submit', submit(form, e, () => register({ inviteCode: code.value.trim(), displayName: name.value.trim() })))
     way('invite', 'I have an invite code', 'Someone wants to see more of you.', form) }
-  // 2. telegram claim
-  { const e = err(), code = h('input', { type: 'text', class: 'code', name: 'code', placeholder: '6 letters', autocomplete: 'one-time-code', autocapitalize: 'characters', spellcheck: 'false', maxlength: 6 })
-    const form = h('form', {}, h('p', { class: 'small muted', style: 'margin:0' }, 'Send ', h('code', {}, '/sources'), ' to the bot, pick the app, and type the code it shows. It lasts 15 minutes.'), code, e, h('button', { type: 'submit', class: 'btn block volt' }, 'Link'))
-    form.addEventListener('submit', submit(form, e, () => claim(code.value.trim())))
-    way('telegram', 'I already use the Telegram bot', 'Same person, now with a porchlight on your phone.', form) }
-  // 3. fresh
+  // 2. fresh
   { const e = err(), name = h('input', { type: 'text', name: 'name', placeholder: 'What should friends call you?', autocomplete: 'name' })
-    const form = h('form', {}, name, e, h('button', { type: 'submit', class: 'btn block ghost' }, 'Start'))
+    const form = h('form', {}, name, e, h('button', { type: 'submit', class: 'btn block' }, 'Start'))
     form.addEventListener('submit', submit(form, e, () => register({ displayName: name.value.trim() })))
     way('fresh', 'Start fresh', 'No code. Invite people once you\'re in.', form) }
+  // 3. email sign-in (an existing person on this node; the link lands back here as /app?claim=CODE)
+  { const e = err(), email = h('input', { type: 'email', name: 'email', placeholder: 'you@example.com', autocomplete: 'email', inputmode: 'email' })
+    const form = h('form', {}, h('p', { class: 'small muted', style: 'margin:0' }, 'Already on this node? A one-time sign-in link goes to the email on your account.'), email, e, h('button', { type: 'submit', class: 'btn block ghost' }, 'Send me a link'))
+    form.addEventListener('submit', submit(form, e, async () => {
+      const v = email.value.trim()
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) throw new Error('that doesn\'t look like an email address')
+      try { await req('/app/email/request', { method: 'POST', body: { email: v }, auth: false }) } catch (ex) { throw ex.status === 404 ? new Error('email sign-in isn\'t set up on this node yet') : ex }
+      form.replaceChildren(h('p', { style: 'margin:0' }, h('b', {}, 'Check your mail.'), ` A sign-in link is on its way to ${v}. Open it on this device.`))
+    }))
+    way('email', 'Sign in with email', 'A link in your inbox, no password.', form) }
+  // 4. telegram claim
+  { const e = err(), code = h('input', { type: 'text', class: 'code', name: 'code', placeholder: '6 letters', autocomplete: 'one-time-code', autocapitalize: 'characters', spellcheck: 'false', maxlength: 6 })
+    const form = h('form', {}, h('p', { class: 'small muted', style: 'margin:0' }, 'Send ', h('code', {}, '/sources'), ' to the bot, pick the app, and type the code it shows. It lasts 15 minutes.'), code, e, h('button', { type: 'submit', class: 'btn block ghost' }, 'Link'))
+    form.addEventListener('submit', submit(form, e, () => claim(code.value.trim(), { typed: true })))
+    way('telegram', 'I already use the Telegram bot', 'Same person, now with a porchlight on your phone.', form) }
 
   open(invite ? 'invite' : 'fresh')
   root.append(h('div', { class: 'nodeline' }, `node: ${nodeHost} · `, h('button', { class: 'link', onclick: () => {
@@ -156,18 +184,21 @@ async function register({ inviteCode, displayName }) {
   const r = await req('/app/register', { method: 'POST', body: { inviteCode, displayName, device: bridge.deviceInfo(), tz: deviceTz() }, auth: false })
   await finishOnboarding(r)
 }
-async function claim(code) {
-  if (!/^[A-Za-z0-9]{6}$/.test(code)) throw new Error('the code is 6 letters or digits')
-  const r = await req('/app/claim', { method: 'POST', body: { code: code.toUpperCase() }, auth: false })
+// A code from the Telegram bot (6 chars, typed) or from an email sign-in link (/app?claim=CODE, any shape): same route, same bundle back.
+async function claim(code, { typed = false } = {}) {
+  if (typed && !/^[A-Za-z0-9]{6}$/.test(code)) throw new Error('the code is 6 letters or digits')
+  if (!code) throw new Error('no code')
+  const r = await req('/app/claim', { method: 'POST', body: { code: typed ? code.toUpperCase() : code }, auth: false })
   await finishOnboarding(r)
 }
 async function finishOnboarding(bundle) {
   token = bundle.ingestUrl.split('/').pop()
   ls.set(KEY, token); ls.set('opportune.signedOut', null)
   ls.set('opportune.telegramLink', bundle.telegramLink || null)
-  ls.set('opportune.hello', bundle.inviter ? `${bundle.inviter} wants to see more of you. Flip your porchlight on when you're around.` : 'You\'re in. Set your porchlight, then invite someone from People.')
+  ls.set('opportune.hello', bundle.inviter ? `${bundle.inviter} wants to see more of you. Flip your porchlight on when you're around.`
+    : bundle.displayName ? `Signed in as ${bundle.displayName}.` : 'You\'re in. Set your porchlight, then invite someone from People.')
   bridge.setIngestUrl(bundle.ingestUrl)   // the shell starts its services; location only if already granted, so we ask next
-  const u = new URL(location.href); u.searchParams.delete('invite'); u.searchParams.delete('token'); history.replaceState(null, '', u.pathname + u.search + '#home')
+  const u = new URL(location.href); for (const k of ['invite', 'token', 'claim']) u.searchParams.delete(k); history.replaceState(null, '', u.pathname + u.search + '#home')
   await start()
   if (isNative && !perms?.location) renderPerms()
 }
@@ -222,6 +253,9 @@ function renderHome() {
     h('div', { class: 'hint' }, 'tap to change'))
   root.append(hero)
 
+  // sources progress, until everything is connected or declined (then it lives in Settings only)
+  if (manage) { const { done, total } = sourceModel(); if (done < total) root.append(progressCard()) }
+
   if (isNative && !perms?.notifications) {
     root.append(h('div', { class: 'card' }, h('h3', {}, 'Let nudges reach you'),
       h('p', { class: 'muted' }, 'A nudge is a notification with yes and veto buttons. Without it the app can only tell you when you open it.'),
@@ -234,7 +268,7 @@ function renderHome() {
 
   // friends
   root.append(h('h2', {}, 'Friends\' porchlights'))
-  if (!state.friends.length) root.append(h('div', { class: 'card empty' }, 'No one has shared a porchlight with you yet. Invite someone from People, or ask a friend for an invite.'))
+  if (!state.friends.length) root.append(h('div', { class: 'card empty' }, 'No one has shared a porchlight with you yet. ', h('button', { class: 'link', onclick: openInviteSheet }, 'Invite someone'), ', or ask a friend for an invite.'))
   for (const f of state.friends) root.append(friendCard(f))
 }
 
@@ -338,7 +372,7 @@ function renderNudges() {
   const root = $('#s-nudges'); root.replaceChildren()
   root.append(h('div', { class: 'screen-head' }, h('h2', {}, 'Nudges'), h('button', { class: 'link small', onclick: () => show('review') }, 'what it kept quiet about →')))
   const list = allNudges()
-  if (!list.length) root.append(h('div', { class: 'card empty' }, 'Nothing yet. When something is worth a buzz, it lands here (and on your phone, and in Telegram).'))
+  if (!list.length) root.append(h('div', { class: 'card empty' }, 'Nothing yet. When something is worth a buzz, it lands here and on your phone.'))
   for (const n of list) root.append(nudgeCard(n))
   const open = list.filter(n => !n.response && !expired(n) && Date.now() - new Date(n.created_at) < 24 * 3600e3).length
   const badge = $('#nudgeBadge'); badge.hidden = !open; badge.textContent = open
@@ -375,38 +409,326 @@ onNudge(n => {
 })
 
 // ======================================================================
-// People / Review: the manage page, embedded and re-skinned (same origin, so we can style inside it)
+// Review: the judge's calls, including what it kept quiet about (reachable from Nudges)
 // ======================================================================
-const EMBED_CSS = `
-  .top, .tabs { display: none !important }
-  html, body { height: auto !important; min-height: 0 !important; background: transparent !important }
-  main { padding: 0 !important; max-width: none !important }
-  :root[data-theme="dark"] { --bg: #090b22; --card: #121539; --fg: #eeedf8; --muted: #a4a8cf; --line: rgba(190,196,255,.16); --acc: #4a74ff; --acc-ink: #fff; --warm: #ff6b3d; --ok: #4ad99a; --chip: rgba(255,255,255,.07); --shadow: 0 1px 2px rgba(0,0,0,.35) }
-  :root[data-theme="light"] { --bg: #f6f5ff; --card: #fff; --fg: #15173a; --muted: #5a5e8a; --line: rgba(20,24,80,.14); --acc: #4a74ff; --acc-ink: #fff; --warm: #ff6b3d; --ok: #1f9d64; --chip: rgba(20,24,80,.05); --shadow: 0 1px 2px rgba(20,24,80,.06) }
-  body { font-family: "Figtree", "Helvetica Neue", system-ui, sans-serif !important }
-  .card { border: 1px solid var(--line) }
-  .btn { border-radius: 12px; min-height: 40px }
-  .toggle[aria-checked="true"] { background: #4ad99a }
-`
-function renderEmbed(tab) {
-  const root = $('#s-embed')
-  if (!frame) {
-    frame = h('iframe', { class: 'embed', title: 'manage', src: `/web/manage?token=${encodeURIComponent(token)}#${tab}`, onload: styleFrame })
-    root.replaceChildren(h('div', { class: 'screen-head' }, h('h2', { id: 'embedTitle' }, tab), tab === 'review' && h('button', { class: 'link small', onclick: () => show('nudges') }, '← nudges')), frame)
-  } else {
-    const head = root.querySelector('.screen-head'); head.replaceChildren(h('h2', {}, tab), ...(tab === 'review' ? [h('button', { class: 'link small', onclick: () => show('nudges') }, '← nudges')] : []))
-    try { frame.contentWindow.location.hash = `#${tab}` } catch {}
+let quietOnly = false
+function renderReview() {
+  const root = $('#s-review'); root.replaceChildren()
+  root.append(head('The judge\'s calls', ['Nudges', 'nudges']))
+  const cb = h('input', { type: 'checkbox', id: 'quietOnly', onchange: e => { quietOnly = e.target.checked; renderReview() } })
+  cb.checked = quietOnly
+  root.append(h('label', { class: 'filter' }, cb, 'only the quiet ones (things it decided not to tell me)'))
+  const list = manage.decisions.filter(d => !quietOnly || d.verdict === 'suppress')
+  if (!list.length) return root.append(h('div', { class: 'card empty' }, manage.decisions.length ? 'Nothing quiet lately.' : 'No judgement calls yet. They show up here, including the ones it keeps to itself.'))
+  for (const d of list) root.append(decisionCard(d))
+}
+function decisionCard(d) {
+  const card = h('div', { class: 'card decision' })
+  const rate = async rating => {
+    let note
+    if (rating === 'bad' && d.verdict !== 'suppress') note = prompt('Why was this a bad call? (optional)') || undefined
+    try { const r = await api(`/decisions/${d.id}/rate`, { method: 'POST', body: { rating, note } }); Object.assign(d, r.decision); card.replaceWith(decisionCard(d)); toast(rating === 'good' ? 'thanks' : 'noted, adjusting') } catch (e) { fail(e) }
+  }
+  const icon = d.verdict === 'suppress' ? '🤫' : d.verdict === 'ask' ? '🙋' : '🔔'
+  const nudge = d.nudgeId && manage.nudges.find(n => n.id === d.nudgeId)
+  // for a suppression, 👍 means "right to stay quiet" and 👎 means "should have told me"
+  const goodLbl = d.verdict === 'suppress' ? '👍 right to stay quiet' : '👍 good call'
+  const badLbl = d.verdict === 'suppress' ? '👎 should have told me' : '👎 shouldn\'t have'
+  card.append(h('div', { class: 'icon', title: d.verdict }, icon), h('div', {},
+    h('div', { class: 'summary' }, d.opportunity.summary || `(${d.verdict})`),
+    nudge && h('div', { class: 'small', style: 'margin-top:4px' }, '→ ', nudge.text, nudge.response ? h('span', { class: 'muted' }, ` · you: ${nudge.response}`) : null),
+    h('div', { class: 'reason' }, d.reasoning),
+    h('div', { class: 'when' }, `${when(d.createdAt)} · ${d.opportunity.kind || ''}`),
+    h('div', { class: 'rate' },
+      h('button', { 'aria-pressed': String(d.rating === 'good'), onclick: () => rate('good') }, goodLbl),
+      h('button', { 'aria-pressed': String(d.rating === 'bad'), onclick: () => rate('bad') }, badLbl),
+      d.ratingNote && h('span', { class: 'note' }, d.ratingNote))))
+  return card
+}
+
+// ======================================================================
+// People: tiers, grants, notes, and inviting someone new
+// ======================================================================
+const GRANTS = [
+  ['askAvailability', 'Ask if I\'m free', 'Their agent can ask mine whether I\'m free; it answers from my calendar.'],
+  ['askDropin', 'Ask to drop by', 'They can ask if dropping in right now is welcome.'],
+  ['autoYesDropin', 'Auto-yes drop-ins', 'My agent says yes to their drop-ins without checking with me (within my windows).'],
+  ['askWhereabouts', 'Ask where I am', 'They can ask roughly where I am (neighbourhood, not a pin).'],
+  ['seeLocationLive', 'See my live location', 'They see my current location on their map, no asking.'],
+  ['seePlans', 'See my plans', 'They can see what\'s on my calendar, not just whether I\'m busy.'],
+]
+const TIERS = ['acquaintance', 'friend', 'trusted']
+const TRAVEL = ['not out of my way', 'a few blocks', 'across town', 'a real trip']
+const THEIRS = { askAvailability: 'I can ask if they\'re free', askDropin: 'I can ask to drop by', autoYesDropin: 'auto-yes to my drop-ins', askWhereabouts: 'I can ask where they are', seeLocationLive: 'they share live location', seePlans: 'I can see their plans' }
+
+function renderPeople() {
+  const root = $('#s-people'); root.replaceChildren()
+  const fs = manage.friends
+  const on = fs.filter(f => !f.shadow), shadow = fs.filter(f => f.shadow)
+  const stars = on.filter(f => f.rel.wantMore).length
+  root.append(h('div', { class: 'screen-head' }, h('h2', {}, `People${on.length ? ` · ${on.length}${stars ? ` · ★ ${stars}` : ''}` : ''}`), h('button', { class: 'btn small', onclick: openInviteSheet }, '+ Invite')))
+  if (!fs.length) root.append(h('div', { class: 'card empty' }, 'No one yet. An invite is a one-time link that says you want to see more of them.', h('div', { style: 'margin-top:12px' }, h('button', { class: 'btn', onclick: openInviteSheet }, 'Invite a friend'))))
+  for (const f of on) root.append(personCard(f))
+  if (shadow.length) {
+    root.append(h('h2', {}, 'Not on opportune yet'), h('p', { class: 'small muted', style: 'margin:-4px 0 10px' }, 'They share their location with you in Google Maps. An invite brings them in.'))
+    for (const f of shadow) root.append(personCard(f))
   }
 }
-function styleFrame() {
-  const d = frame.contentDocument, w = frame.contentWindow
-  if (!d?.head) return
-  d.documentElement.dataset.theme = isDark() ? 'dark' : 'light'
-  d.head.append(Object.assign(d.createElement('style'), { textContent: EMBED_CSS }))
-  const fit = () => { frame.style.height = `${Math.max(320, d.documentElement.scrollHeight)}px` }
-  fit(); if (w.ResizeObserver) new w.ResizeObserver(fit).observe(d.body); else setInterval(fit, 1000)
-  // the page inside wants a full-screen map; we have our own Map tab
-  d.addEventListener('click', e => { const t = e.target.closest('a[href*="/web/map"]'); if (t) { e.preventDefault(); show('map') } })
+
+function personCard(f, openState = []) {
+  const card = h('div', { class: 'card person', 'data-id': f.id })
+  const patch = async (body, okMsg) => {
+    try {
+      const { friend } = await api(`/friends/${f.id}`, { method: 'PATCH', body })
+      Object.assign(f, friend)
+      card.replaceWith(personCard(f, [...card.querySelectorAll('details')].map(d => d.open)))   // keep whichever sections were expanded
+      if (okMsg) toast(okMsg)
+    } catch (e) { fail(e) }
+  }
+  const star = h('button', { class: 'star', 'aria-pressed': String(f.rel.wantMore), title: 'I want to see more of them', 'aria-label': 'I want to see more of them', onclick: () => patch({ wantMore: !f.rel.wantMore }) }, '★')
+  const tags = h('div', { class: 'tags' })
+  if (f.shadow) tags.append(h('span', { class: 'tag' }, 'not on opportune'))
+  if (f.remote) tags.append(h('span', { class: 'tag' }, 'other node'))
+  if (f.lastLocationAgeMin != null) tags.append(h('span', { class: 'tag on' }, `● seen ${ago(f.lastLocationAgeMin)}`))
+  if (f.theirs?.wantMore) tags.append(h('span', { class: 'tag' }, 'wants more of you'))
+  card.append(h('div', { class: 'head' }, h('div', { class: 'name' }, f.displayName || '(unnamed)', tags.childElementCount ? tags : null), star))
+
+  if (f.shadow) {
+    const out = h('div')
+    card.append(h('button', { class: 'btn small', style: 'margin-top:8px', onclick: async e => {
+      e.target.disabled = true
+      try { const inv = await api(`/friends/${f.id}/invite-link`, { method: 'POST' }); out.replaceChildren(shareRow(inv.url, f.displayName)) } catch (err) { fail(err) } finally { e.target.disabled = false }
+    } }, 'Make invite link'), out)
+  }
+
+  // tier
+  const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'tier' }, TIERS.map(t => h('button', { 'aria-pressed': String(f.rel.tier === t), onclick: () => f.rel.tier !== t && patch({ tier: t }) }, t)))
+  card.append(h('div', { class: 'row', style: 'flex-wrap:wrap' }, h('div', { class: 'lbl' }, h('b', {}, 'Tier'), h('span', {}, 'sets the default grants below')), seg))
+
+  // travel
+  const out = h('output', {}, TRAVEL[f.rel.travel ?? 1])
+  const range = h('input', { type: 'range', min: 0, max: 3, step: 1, value: f.rel.travel ?? 1, 'aria-label': 'how far out of my way', oninput: e => { out.textContent = TRAVEL[e.target.value] }, onchange: e => patch({ travel: Number(e.target.value) }) })
+  card.append(h('div', { class: 'row', style: 'flex-wrap:wrap' }, h('div', { class: 'lbl' }, h('b', {}, 'How far out of my way'), h('span', {}, 'private: they never see this')), h('div', { class: 'slider' }, range, out)))
+
+  // grants
+  const grants = h('details', {}, h('summary', {}, 'What they may do with my data'))
+  for (const [k, label, why] of GRANTS) {
+    const eff = !!f.rel.effectiveGrants[k], custom = k in f.rel.grants
+    grants.append(h('div', { class: 'row' },
+      h('div', { class: 'lbl' }, h('b', {}, label, custom && h('button', { class: 'custom', title: 'back to tier default', onclick: () => patch({ grants: { [k]: null } }) }, 'custom · reset')), h('span', {}, why)),
+      h('button', { class: 'toggle', role: 'switch', 'aria-checked': String(eff), 'aria-label': label, onclick: () => patch({ grants: { [k]: !eff } }) })))
+  }
+  card.append(grants)
+
+  // what they've given me
+  if (f.theirs) {
+    const chips = Object.entries(THEIRS).filter(([k]) => f.theirs.effectiveGrants?.[k]).map(([, t]) => h('span', { class: 'chip on' }, t))
+    card.append(h('details', {}, h('summary', {}, `What ${f.displayName || 'they'} lets me do`), h('div', { class: 'chips small', style: 'padding:4px 0 8px' }, chips.length ? chips : h('span', { class: 'chip' }, 'nothing yet'), h('span', { class: 'chip' }, `they rate me ${f.theirs.tier}`))))
+  }
+
+  // via
+  const via = h('details', {}, h('summary', {}, `Friends of ${f.displayName || 'them'}`))
+  const viaSeg = h('div', { class: 'seg' }, [[null, 'nothing'], ['acquaintance', 'acquaintance'], ['friend', 'friend']].map(([v, l]) => h('button', { 'aria-pressed': String((f.rel.via.tier || null) === v), onclick: () => patch({ via: { tier: v } }) }, l)))
+  via.append(h('div', { class: 'row', style: 'flex-wrap:wrap' }, h('div', { class: 'lbl' }, h('b', {}, 'Extend to people they vouch for'), h('span', {}, 'what their friends get from me before we\'ve met')), viaSeg))
+  via.append(h('div', { class: 'row' }, h('div', { class: 'lbl' }, h('b', {}, 'Open to intros'), h('span', {}, 'their friend is nearby and they bless it → I\'d hear about it')),
+    h('button', { class: 'toggle', role: 'switch', 'aria-checked': String(f.rel.via.openToIntro), 'aria-label': 'open to intros', onclick: () => patch({ via: { openToIntro: !f.rel.via.openToIntro } }) })))
+  via.append(h('div', { class: 'row' }, h('div', { class: 'lbl' }, h('b', {}, 'Vouch for them'), h('span', {}, 'I\'m willing to be the path from them to my friends')),
+    h('button', { class: 'toggle', role: 'switch', 'aria-checked': String(f.rel.vouch), 'aria-label': 'vouch for them', onclick: () => patch({ vouch: !f.rel.vouch }) })))
+  card.append(via)
+
+  // note
+  const saved = h('div', { class: 'saved' })
+  const save = debounce(async v => {
+    try { const { friend } = await api(`/friends/${f.id}`, { method: 'PATCH', body: { note: v } }); f.rel.note = friend.rel.note; saved.textContent = 'saved' } catch (e) { saved.textContent = 'not saved'; fail(e) }
+  }, 600)
+  const ta = h('textarea', { placeholder: 'Note for my agent: lives near GO, hates mornings, has a kid…', rows: 2, oninput: e => { saved.textContent = '…'; save(e.target.value) } })
+  ta.value = f.rel.note || ''
+  card.append(h('div', { class: 'row', style: 'display:block' }, ta, saved))
+  card.querySelectorAll('details').forEach((d, i) => { if (openState[i]) d.open = true })
+  return card
+}
+
+// "+ Invite a friend": a name, whether you want more of them, then a one-time link to share however you like.
+function openInviteSheet() {
+  const name = h('input', { type: 'text', placeholder: 'Their name', autocomplete: 'off', maxlength: 40 })
+  const want = h('button', { class: 'toggle', role: 'switch', 'aria-checked': 'true', 'aria-label': 'I want to see more of them', onclick: () => want.setAttribute('aria-checked', String(want.getAttribute('aria-checked') !== 'true')) })
+  const out = h('div'), err = h('div', { class: 'err small', style: 'color:var(--ember)' })
+  const btn = h('button', { class: 'btn block', onclick: async () => {
+    err.textContent = ''
+    const n = name.value.trim(); if (!n) { err.textContent = 'a name, so the link can say who it\'s for'; name.focus(); return }
+    btn.disabled = true
+    try {
+      const inv = await req('/api/app/invites', { method: 'POST', body: { name: n, wantMore: want.getAttribute('aria-checked') === 'true' } })
+      out.replaceChildren(h('p', { class: 'small muted', style: 'margin:12px 0 0' }, `One-time link for ${inv.name}. It lasts two weeks and says ${inv.wantMore ? 'you want to see more of them' : 'you\'re on opportune'}.`), shareRow(inv.url, inv.name))
+      btn.textContent = 'Another'; name.value = ''
+      if (manage) loadManage().catch(() => {})
+    } catch (e) { err.textContent = e.message } finally { btn.disabled = false }
+  } }, 'Make the link')
+  openSheet(h('h3', {}, 'Invite a friend'), h('p', { class: 'small muted', style: 'margin:0' }, 'They get a link that brings them in and connects you two. Nothing public, no directory.'),
+    h('div', { class: 'lbl' }, 'Name'), name,
+    h('div', { class: 'row' }, h('div', { style: 'flex:1' }, h('b', {}, 'I want to see more of them'), h('div', { class: 'small muted' }, 'the whole filter: it only nudges about people you\'ve said this about')), want),
+    err, btn, out,
+    h('div', { class: 'foot' }, h('button', { class: 'btn ghost small', onclick: closeSheet }, 'Done')))
+  setTimeout(() => name.focus(), 50)
+}
+// A link with Share (where the OS has a share sheet) and Copy.
+function shareRow(url, forName) {
+  const text = `${session?.me?.displayName || 'A friend'} wants to see more of you on opportune: ${url}`
+  const copy = async () => { try { await navigator.clipboard.writeText(url); toast('copied') } catch { toast('long-press to copy') } }
+  const share = navigator.share ? h('button', { class: 'btn small', onclick: () => navigator.share({ title: `An invite for ${forName || 'you'}`, text, url }).catch(() => {}) }, 'Share') : null
+  return h('div', { class: 'copy', style: 'flex-wrap:wrap' }, h('code', {}, url), share, h('button', { class: 'btn small ghost', onclick: copy }, 'Copy'))
+}
+
+// ======================================================================
+// Sources: what the agent can see. Progress card (Home + Settings) → this screen.
+// ======================================================================
+// Each available source → { m, sc, kind: 'connected' | 'covered' | 'available', declined }.
+// Inside the shell the app itself is the location source, so locationPost is "covered" (no setup to do).
+// The opportuneApp source is connected for everyone using /app (the server does that), but it only means
+// something once the Android app is on a phone: in a browser without one it's a step, not a tick.
+function sourceModel() {
+  const { connected, available } = manage.sources
+  const declined = new Set(session.declinedSources || [])
+  const items = available.map(m => {
+    const sc = connected.find(c => c.sourceId === m.id && c.enabled)
+    let kind = sc ? 'connected' : 'available'
+    if (m.id === 'opportuneApp') kind = isNative || session.pushBound ? 'connected' : 'available'
+    else if (m.id === 'locationPost' && isNative) kind = 'covered'
+    return { m, sc, kind, declined: kind === 'available' && declined.has(m.id) }
+  })
+  const counted = items.filter(i => !i.declined)
+  return { items, done: counted.filter(i => i.kind !== 'available').length, total: counted.length }
+}
+function progressCard() {
+  const { done, total } = sourceModel()
+  const all = done >= total
+  const go = () => show('sources')
+  return h('div', { class: `card progress${all ? ' done' : ''}`, role: 'button', tabindex: '0', 'aria-label': 'sources', onclick: go, onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go() } } },
+    h('b', {}, all ? 'All sources connected' : `${done} of ${total} sources connected`),
+    h('span', { class: 'arrow' }, '›'),
+    h('div', { class: 'sub' }, all ? 'calendar, location, event mail… tap to check on them' : 'the more it can see, the more it can notice. Tap to add one.'),
+    h('div', { class: 'bar' }, h('i', { style: `width:${total ? Math.round(100 * done / total) : 0}%` })))
+}
+function renderSources() {
+  const root = $('#s-sources'); root.replaceChildren()
+  root.append(head('Sources', ['Settings', 'settings']), progressCard(),
+    h('p', { class: 'small muted', style: 'margin:-4px 0 14px 4px' }, 'Everything stays on your node. Friends\' agents only ever get answers ("likely free Thursday"), never the data.'))
+  const { items } = sourceModel()
+  const on = items.filter(i => i.kind !== 'available'), todo = items.filter(i => i.kind === 'available' && !i.declined), declined = items.filter(i => i.declined)
+  if (on.length) { root.append(h('h2', {}, 'Connected')); for (const i of on) root.append(sourceCard(i)) }
+  if (todo.length) { root.append(h('h2', {}, on.length ? 'Add one' : 'Pick one to start')); for (const i of todo) root.append(sourceCard(i)) }
+  if (declined.length) {
+    const d = h('details', { style: 'border:0;margin-top:14px' }, h('summary', { class: 'small muted' }, `Not for me (${declined.length})`))
+    for (const i of declined) d.append(h('div', { class: 'row' }, h('div', { class: 'lbl' }, h('b', {}, i.m.name), h('span', {}, i.m.description)), h('button', { class: 'btn small ghost', onclick: () => setDeclined(i.m.id, false) }, 'Undo')))
+    root.append(d)
+  }
+}
+async function setDeclined(id, on) {
+  const cur = new Set(session.declinedSources || []); on ? cur.add(id) : cur.delete(id)
+  try { const r = await req('/api/app/me', { method: 'PATCH', body: { declinedSources: [...cur] } }); session.declinedSources = r.declinedSources; toast(on ? 'hidden; undo at the bottom' : 'back in the list'); renderSources(); if (state) renderHome() } catch (e) { fail(e) }
+}
+// non-secret config at a glance (the API redacts secrets to bullets; those are left out)
+const cfgSummary = sc => Object.entries(sc?.config || {}).filter(([k, v]) => k !== 'device' && k !== 'installed' && v !== '••••••').map(([k, v]) => `${k}: ${Array.isArray(v) ? `${v.length} item${v.length === 1 ? '' : 's'}` : String(v)}`).join(' · ')
+function sourceCard({ m, sc, kind }) {
+  const card = h('div', { class: 'card src', 'data-source': m.id })
+  const tag = kind === 'covered' ? h('span', { class: 'tag on' }, 'covered by this app')
+    : kind === 'connected' ? (sc?.lastError ? h('span', { class: 'tag err' }, 'error') : h('span', { class: 'tag on' }, m.id === 'opportuneApp' && isNative ? 'this phone' : 'on')) : null
+  card.append(h('div', { class: 'head' }, h('div', { class: 'name' }, m.name), tag))
+
+  if (m.id === 'opportuneApp') {
+    if (kind === 'connected') card.append(h('p', { class: 'desc' }, isNative ? 'Location, notifications and contacts come through this app. Nothing to paste anywhere.' : 'An Android phone is registered for push and background location.'))
+    else card.append(h('p', { class: 'desc' }, 'Background location and nudges with yes/veto buttons, from your pocket. This browser already counts as the app for everything else.'),
+      h('div', { class: 'foot' }, h('button', { class: 'btn small', onclick: () => bridge.openExternal('https://github.com/malcolmocean/opportune/tree/main/apps/android') }, 'Get the Android app'), declineBtn(m.id)))
+    return card
+  }
+  if (kind === 'covered') { card.append(h('p', { class: 'desc' }, 'Your location already arrives through this app. Overland and OwnTracks are for iPhones and browsers.')); return card }
+
+  card.append(h('p', { class: 'desc' }, m.description))
+  if (kind === 'connected') {
+    const summary = cfgSummary(sc)
+    if (summary) card.append(h('div', { class: 'cfg' }, summary))
+    if (sc.lastPollAt) card.append(h('div', { class: 'cfg' }, `last checked ${when(sc.lastPollAt)}`))
+    if (sc.lastError) card.append(h('div', { class: 'err' }, sc.lastError))
+    if (sc.ingestUrl) {
+      const instr = (m.setup || []).find(s => s.type === 'choice')?.instructions?.[sc.config?.app]
+      card.append(h('div', { class: 'cfg', style: 'margin-top:8px' }, instr ? `${instr.replace(/the URL below/i, 'this URL')}` : 'Point the app at this URL:'), copyRow(sc.ingestUrl))
+    }
+    card.append(h('details', {}, h('summary', {}, 'Change settings'), setupForm(m, sc)))
+  } else {
+    card.append(h('details', {}, h('summary', {}, 'Set up'), setupForm(m, null)), h('div', { class: 'foot' }, declineBtn(m.id)))
+  }
+  return card
+}
+const declineBtn = id => h('button', { class: 'link small', onclick: () => setDeclined(id, true) }, 'Not for me')
+// The manifest's setup steps as a form. Prefilled from the (redacted) config when reconnecting; a blank secret keeps the stored one.
+function setupForm(m, sc) {
+  const form = h('form', { onsubmit: async e => {
+    e.preventDefault()
+    const config = {}
+    for (const s of m.setup || []) { const el = form.elements[s.key]; if (el && el.value !== '') config[s.key] = el.value }
+    const btn = form.querySelector('button[type=submit]'); btn.disabled = true
+    try {
+      const r = await api('/sources', { method: 'POST', body: { sourceId: m.id, config } })
+      toast(`${m.name} ${sc ? 'updated' : 'connected'}`)
+      await loadManage(); renderSources(); if (state) renderHome()
+      if (r.ingestUrl) $(`#s-sources [data-source="${m.id}"]`)?.scrollIntoView({ block: 'center' })
+    } catch (err) { fail(err); btn.disabled = false }
+  } })
+  for (const s of m.setup || []) {
+    if (s.type === 'install-app') continue
+    const id = `${m.id}-${s.key}`, cur = sc?.config?.[s.key]
+    const field = h('div', { class: 'field' }, h('label', { for: id }, s.label))
+    if (s.type === 'choice') {
+      const instr = h('div', { class: 'instr' })
+      const sel = h('select', { name: s.key, id, onchange: () => { instr.textContent = s.instructions?.[sel.value] || ''; instr.hidden = !instr.textContent } }, (s.choices || []).filter(c => c !== 'opportune Android app').map(c => h('option', { value: c }, c)))   // the Android app has its own source now
+      if (cur && s.choices?.includes(cur)) sel.value = cur
+      field.append(sel, instr); setTimeout(() => sel.dispatchEvent(new Event('change')), 0)
+    } else if (s.type === 'secret') {
+      field.append(h('input', { type: 'password', name: s.key, id, autocomplete: 'off', placeholder: sc && cur ? 'unchanged' : '' }))
+    } else {
+      const inp = h('input', { type: s.type === 'url' ? 'url' : 'text', name: s.key, id, autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' })
+      if (cur != null) inp.value = Array.isArray(cur) ? cur.join(cur.every(x => /^https?:/.test(String(x))) ? ' ' : ', ') : String(cur)
+      field.append(inp)
+    }
+    form.append(field)
+  }
+  form.append(h('div', { class: 'form-foot' }, h('button', { type: 'submit', class: 'btn small' }, sc ? 'Save' : 'Connect'), m.repo && h('a', { class: 'small', href: m.repo, target: '_blank', rel: 'noopener' }, 'about this source')))
+  return form
+}
+
+// ======================================================================
+// Drop-in windows, quiet hours, max nudges, digest hour (PATCH /api/manage/policy)
+// ======================================================================
+const DAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+function renderWindows() {
+  const root = $('#s-windows'); root.replaceChildren()
+  root.append(head('Nudges & drop-ins', ['Settings', 'settings']))
+  const pol = structuredClone(manage.policy)
+  const hourSel = (val, onchange, label) => h('select', { class: 'auto', 'aria-label': label, onchange: e => onchange(Number(e.target.value)) }, Array.from({ length: 24 }, (_, i) => { const o = h('option', { value: i }, `${i}:00`); if (i === val) o.selected = true; return o }))
+  const save = async patch => { try { const { policy } = await api('/policy', { method: 'PATCH', body: patch }); manage.policy = policy; toast('saved') } catch (e) { fail(e) } }
+  const row = (title, sub, right) => h('div', { class: 'row', style: 'flex-wrap:wrap' }, h('div', { class: 'lbl' }, h('b', {}, title), sub && h('span', {}, sub)), right)
+
+  root.append(h('h2', {}, 'Nudges'), h('div', { class: 'card' },
+    row('Quiet hours', 'no nudges between these', h('div', { class: 'inline' }, hourSel(pol.quietHours?.start ?? 23, v => { pol.quietHours = { ...pol.quietHours, start: v }; save({ quietHours: pol.quietHours }) }, 'quiet from'), '–', hourSel(pol.quietHours?.end ?? 8, v => { pol.quietHours = { ...pol.quietHours, end: v }; save({ quietHours: pol.quietHours }) }, 'quiet until'))),
+    row('Max nudges per day', null, h('input', { type: 'number', min: 0, max: 50, value: pol.maxNudgesPerDay ?? 6, 'aria-label': 'max nudges per day', onchange: e => save({ maxNudgesPerDay: Number(e.target.value) }) })),
+    row('Morning digest at', 'what happened, and what it stayed quiet about', hourSel(pol.digestHour ?? 9, v => save({ digestHour: v }), 'digest hour'))))
+
+  const drop = h('div', { class: 'card' })
+  const seg = h('div', { class: 'seg' }, ['open', 'ask', 'closed'].map(v => h('button', { 'aria-pressed': String(pol.dropinDefault === v), onclick: () => { pol.dropinDefault = v; save({ dropinDefault: v }).then(renderWindows) } }, v)))
+  drop.append(h('div', { class: 'row', style: 'display:block' }, h('div', { class: 'lbl' }, h('b', {}, 'Drop-ins by default'), h('span', { style: 'margin-bottom:8px' }, 'open = my agent says yes within the windows below; ask = it checks with me')), seg))
+  const windows = h('div')
+  const drawWindows = () => {
+    windows.replaceChildren()
+    pol.dropinWindows.forEach((w, i) => {
+      const days = h('div', { class: 'days' }, DAYS.map((d, di) => h('button', { 'aria-pressed': String(w.days.includes(di)), 'aria-label': ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][di], onclick: () => { w.days = w.days.includes(di) ? w.days.filter(x => x !== di) : [...w.days, di].sort(); save({ dropinWindows: pol.dropinWindows }); drawWindows() } }, d)))
+      windows.append(h('div', { class: 'window' }, days, hourSel(w.start, v => { w.start = v; save({ dropinWindows: pol.dropinWindows }) }, 'from'), '–', hourSel(w.end, v => { w.end = v; save({ dropinWindows: pol.dropinWindows }) }, 'until'),
+        h('button', { class: 'x', title: 'remove', 'aria-label': 'remove window', onclick: () => { pol.dropinWindows.splice(i, 1); save({ dropinWindows: pol.dropinWindows }); drawWindows() } }, '×')))
+    })
+    windows.append(h('button', { class: 'btn small ghost', style: 'margin-top:8px', onclick: () => { pol.dropinWindows.push({ days: [1, 2, 3, 4, 5], start: 18, end: 22 }); save({ dropinWindows: pol.dropinWindows }); drawWindows() } }, '+ window'))
+  }
+  drawWindows()
+  drop.append(h('div', { class: 'row', style: 'display:block' }, h('div', { class: 'lbl' }, h('b', {}, 'Drop-in windows'), h('span', {}, 'when "open" applies without you saying so')), windows))
+  root.append(h('h2', {}, 'Drop-ins'), drop)
 }
 
 // ======================================================================
@@ -422,7 +744,7 @@ async function renderMap() {
 }
 
 // ======================================================================
-// Settings
+// Settings. Sections in the order a later onboarding pass can lift them: sources, you, permissions, people, nudges.
 // ======================================================================
 async function renderSettings() {
   const root = $('#s-settings'); root.replaceChildren()
@@ -431,16 +753,18 @@ async function renderSettings() {
   const me = session.me
   const row = (title, sub, right, icon) => h('div', { class: 'row' }, icon && ico(icon), h('div', { class: 'lbl' }, h('b', {}, title), sub && h('span', {}, sub)), right)
   const status = (ok, onLabel = 'allowed', offLabel = 'not yet') => h('span', { class: 'small muted' }, h('i', { class: `dot ${ok ? 'on' : ok === false ? 'off' : ''}` }), ok ? onLabel : ok === false ? offLabel : 'unknown')
+  const goBtn = (label, to) => h('button', { class: 'btn small ghost', onclick: () => show(to) }, label)
+
+  // sources: the thing that makes everything else work (the people section below also needs /api/manage/me; re-render once it's here)
+  if (manage) root.append(progressCard())
+  else { const ph = h('div', { class: 'card progress' }, h('b', {}, 'Sources'), h('span', { class: 'arrow' }, '›'), h('div', { class: 'sub' }, 'loading…')); root.append(ph); loadManage().then(() => { if (current === 'settings') renderSettings() }).catch(() => { ph.querySelector('.sub').textContent = 'couldn\'t load'; ph.onclick = () => show('sources') }) }
 
   // me
   root.append(h('h2', {}, 'You'), h('div', { class: 'card' },
     row(me.displayName || '(unnamed)', null),
+    row('Email', me.email ? 'for sign-in links on a new device' : 'so you can sign in on another device', me.email ? h('span', { class: 'small muted' }, me.email) : emailForm()),
     row('Timezone', 'from this device; quiet hours and digests follow it', h('span', { class: 'small muted' }, me.tz)),
-    row('Node', null, h('code', {}, new URL(me.nodeUrl || location.origin).host)),
-    row('Telegram', session.telegramLinked ? 'linked: nudges and chat reach you there' : 'optional: chat with your agent ("who\'s around tonight?")',
-      session.telegramLinked ? status(true, 'linked') : (session.telegramLink || ls.get('opportune.telegramLink'))
-        ? h('button', { class: 'btn small volt', onclick: () => bridge.openExternal(session.telegramLink || ls.get('opportune.telegramLink')) }, 'Link Telegram')
-        : h('span', { class: 'small muted' }, 'no bot on this node'))))
+    row('Node', null, h('code', {}, new URL(me.nodeUrl || location.origin).host))))
 
   // permissions
   const permCard = h('div', { class: 'card' })
@@ -463,26 +787,28 @@ async function renderSettings() {
   } else {
     permCard.append(
       row('Location (this browser)', 'one-off fixes for "set home" and "heading over"', perms?.location ? status(true) : h('button', { class: 'btn small ghost', onclick: async () => { try { await currentLocation(); renderSettings() } catch (e) { fail(e) } } }, 'Allow'), 'pin'),
-      row('Background location', 'browsers can\'t. Two ways to get it:', null, 'pocket'),
-      h('p', { class: 'small', style: 'margin:0 0 10px' }, h('a', { href: 'https://github.com/malcolmocean/opportune/tree/main/apps/android', target: '_blank', rel: 'noopener' }, 'Install the Android app'), ' and sign in with the same invite or the Telegram code; it keeps your porchlight honest and shows nudges with yes/veto buttons.'),
-      h('p', { class: 'small', style: 'margin:0' }, 'On iPhone, ', h('a', { href: 'https://overland.p3k.app/', target: '_blank', rel: 'noopener' }, 'Overland'), ' (or OwnTracks in HTTP mode) can post to this URL:'))
-    const urlBox = h('div')
-    const showUrl = u => urlBox.replaceChildren(copyRow(u))
-    if (session.locationPostUrl) showUrl(session.locationPostUrl)
-    else urlBox.append(h('button', { class: 'btn small ghost', style: 'margin-top:8px', onclick: async e => {
-      e.target.disabled = true
-      try { const r = await req('/api/manage/sources', { method: 'POST', body: { sourceId: 'locationPost', config: { app: 'Overland (iOS)' } } }); session.locationPostUrl = r.ingestUrl; showUrl(r.ingestUrl) } catch (err) { fail(err); e.target.disabled = false }
-    } }, 'Make me a location URL'))
-    permCard.append(urlBox, row('Push', 'nudges arrive in Telegram or the Android app', status(session.pushBound || session.telegramLinked, session.pushBound ? 'app registered' : 'via Telegram', 'nowhere yet: link Telegram')))
+      row('Background location', 'browsers can\'t. The Android app does it; on iPhone, Overland posts to your node. Both are under Sources.', goBtn('Sources', 'sources'), 'pocket'),
+      row('Push', 'nudges arrive in the Android app (or Telegram, if linked)', status(session.pushBound || session.telegramLinked, session.pushBound ? 'app registered' : 'via Telegram', 'nowhere yet'), 'push'))
   }
   root.append(h('h2', {}, isNative ? 'Permissions' : 'This device'), permCard)
 
-  // more
-  root.append(h('h2', {}, 'More'), h('div', { class: 'card' },
-    row('Drop-in windows & quiet hours', 'when "open" applies by default; max nudges a day', h('button', { class: 'btn small ghost', onclick: () => { show('people'); setTimeout(() => { try { frame.contentWindow.location.hash = '#settings'; $('#embedTitle') && ($('#embedTitle').textContent = 'settings') } catch {} }, 50) } }, 'Open')),
-    row('Sources', 'calendars, event mail, tweets', h('button', { class: 'btn small ghost', onclick: () => { show('people'); setTimeout(() => { try { frame.contentWindow.location.hash = '#sources'; $('#embedTitle') && ($('#embedTitle').textContent = 'sources') } catch {} }, 50) } }, 'Open')),
-    row('The judge\'s calls', 'every nudge and every time it stayed quiet', h('button', { class: 'btn small ghost', onclick: () => show('review') }, 'Review')),
-    row('Full management page', 'the same thing in a plain browser tab', h('a', { class: 'btn small ghost', href: session.manageUrl.replace(/^https?:\/\/[^/]+/, ''), target: '_blank', rel: 'noopener' }, 'Open'))))
+  // people
+  const fs = manage?.friends || [], onF = fs.filter(f => !f.shadow)
+  root.append(h('h2', {}, 'People'), h('div', { class: 'card' },
+    row(onF.length ? `${onF.length} ${onF.length === 1 ? 'person' : 'people'}` : 'No one yet', onF.length ? `★ ${onF.filter(f => f.rel.wantMore).length} you want more of · tiers, grants and notes` : 'invite someone to get started', goBtn('People', 'people')),
+    row('Invite a friend', 'a one-time link that says you want to see more of them', h('button', { class: 'btn small', onclick: openInviteSheet }, '+ Invite'))))
+
+  // nudges
+  root.append(h('h2', {}, 'Nudges'), h('div', { class: 'card' },
+    row('Drop-in windows & quiet hours', 'when "open" applies by default; max nudges a day; digest time', goBtn('Open', 'windows')),
+    row('The judge\'s calls', 'every nudge and every time it stayed quiet; rate them', goBtn('Review', 'review'))))
+
+  // telegram: optional, never the default
+  root.append(h('h2', {}, 'Optional'), h('div', { class: 'card' },
+    row('Telegram', session.telegramLinked ? 'linked: nudges and chat with your agent reach you there too' : 'chat with your agent in Telegram ("who\'s around tonight?"). Everything else is here in the app.',
+      session.telegramLinked ? status(true, 'linked') : (session.telegramLink || ls.get('opportune.telegramLink'))
+        ? h('button', { class: 'btn small ghost', onclick: () => bridge.openExternal(session.telegramLink || ls.get('opportune.telegramLink')) }, 'Link')
+        : h('span', { class: 'small muted' }, 'no bot on this node'))))
 
   // appearance
   const seg = h('div', { class: 'seg' }, ['system', 'dark', 'light'].map(v => h('button', { 'aria-pressed': String(themePref() === v), onclick: () => { ls.set('opportune.theme', v === 'system' ? null : v); applyTheme(); renderSettings() } }, v)))
@@ -491,6 +817,18 @@ async function renderSettings() {
   // sign out
   root.append(h('div', { class: 'card', style: 'margin-top:20px' },
     row('Sign out', isNative ? 'forgets this sign-in and stops sharing location from this phone' : 'forgets the token in this browser', h('button', { class: 'btn small ghost', onclick: signOut }, 'Sign out'))))
+}
+// Settings → You → Email: POST /api/app/email { email } sends a verification link; the address shows once it's confirmed.
+function emailForm() {
+  const inp = h('input', { type: 'email', placeholder: 'you@example.com', autocomplete: 'email', inputmode: 'email', 'aria-label': 'email', style: 'min-height:40px;padding:6px 12px;border-radius:10px' })
+  const btn = h('button', { class: 'btn small ghost', onclick: async () => {
+    const v = inp.value.trim()
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return toast('that doesn\'t look like an email address')
+    btn.disabled = true
+    try { await req('/api/app/email', { method: 'POST', body: { email: v } }); toast(`check ${v} for a verification link`) }
+    catch (e) { toast(e.status === 404 ? 'email sign-in isn\'t set up on this node yet' : e.message) } finally { btn.disabled = false }
+  } }, 'Add')
+  return h('div', { style: 'display:flex;gap:6px;align-items:center;max-width:60%' }, inp, btn)
 }
 // Small line icons for settings rows, same stroke style as the tab bar.
 const ICONS = {
@@ -509,9 +847,8 @@ function signOut(msg) {
   if (!msg && !confirm('Sign out on this device?')) return
   for (const k of [KEY, 'opportune.telegramLink', 'opportune.hello', 'opportune.porch.total']) ls.set(k, null)
   ls.set('opportune.signedOut', '1')
-  token = null; session = null; state = null; extraNudges = []
+  token = null; session = null; state = null; manage = null; extraNudges = []
   clearInterval(refreshT)
-  if (frame) { frame.remove(); frame = null }
   if (isNative) bridge.signOut()   // clears the ingest URL and stops the location service
   history.replaceState(null, '', location.pathname)
   renderOnboard(msg)
@@ -526,6 +863,7 @@ async function refresh() {
     state = s
     extraNudges = extraNudges.filter(x => !s.nudges.some(n => n.id === x.id))
     $('#who').textContent = s.me.name || ''
+    if (manage) loadManage().catch(() => {})   // keep source status / people fresh for the next time those screens open
     renderHome(); renderNudges()
   } catch (e) {
     if (e.status === 401) return signOut('That link isn\'t valid any more. Sign in again.')
@@ -537,6 +875,7 @@ async function start() {
   session = await req('/api/app/session', { method: 'POST', body: { device: bridge.deviceInfo(), tz: deviceTz() } })
   if (isNative && !bridge.ingestUrl()) bridge.setIngestUrl(session.ingestUrl)
   perms = isNative ? bridge.permissions() : await browserPermissions()
+  loadManage().then(() => { if (state && current === 'home') renderHome() }).catch(() => {})   // the sources progress card on Home
   await refresh()
   $('#tabbar').hidden = false
   show(tabFromHash())
@@ -553,12 +892,19 @@ function readToken() {
 }
 
 applyTheme()
-token = readToken()
-if (!token) renderOnboard()
-else {
-  try { await start() } catch (e) {
-    if (e.status === 401) signOut('That link isn\'t valid any more. Sign in again.')
-    else { $('#s-onboard').hidden = false; $('#s-onboard').replaceChildren(h('div', { class: 'gate' }, h('h1', {}, 'Couldn\'t reach your node'), h('p', { class: 'muted' }, e.message), h('button', { class: 'btn', onclick: () => location.reload() }, 'Try again'))) }
+const claimCode = new URL(location.href).searchParams.get('claim')
+if (claimCode) {
+  // a sign-in link (email) or a code someone pasted into the URL: claim it, then carry on as that person
+  const u = new URL(location.href); u.searchParams.delete('claim'); history.replaceState(null, '', u.pathname + u.search + u.hash)
+  try { await claim(claimCode.trim()) } catch (e) { renderOnboard(e.status === 404 ? 'That sign-in link has been used or expired. Ask for a fresh one.' : e.message) }
+} else {
+  token = readToken()
+  if (!token) renderOnboard()
+  else {
+    try { await start() } catch (e) {
+      if (e.status === 401) signOut('That link isn\'t valid any more. Sign in again.')
+      else { $('#s-onboard').hidden = false; $('#s-onboard').replaceChildren(h('div', { class: 'gate' }, h('h1', {}, 'Couldn\'t reach your node'), h('p', { class: 'muted' }, e.message), h('button', { class: 'btn', onclick: () => location.reload() }, 'Try again'))) }
+    }
   }
 }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && state) refresh().then(() => { if (current === 'map') renderMap() }).catch(() => {}) })

@@ -1,6 +1,10 @@
 // Two people on the system are physically close and both recent. Deterministic; the Judge decides if it's worth a buzz.
 // One opportunity per recipient: the other person's place name appears in a recipient's summary/evidence only when
 // that person grants the recipient askWhereabouts (their edge toward the recipient). Distance alone is always fine.
+// A fix taken in a vehicle (speed, or the phone's motion state) never counts: two cars passing, or one driving past a
+// friend on the sidewalk, is not a chance to hang out. Once out of the car they are a candidate on the next fix.
+import { inVehicle, history } from '../../core/motion.js'
+
 const FRESH_MS = 40 * 60e3
 export default {
   id: 'nearby',
@@ -10,10 +14,12 @@ export default {
   run(ctx, { observation: o, person }) {
     const me = o.data
     if (!me?.lat) return []
+    if (inVehicle(o, history(ctx, person.id, o).motions)) return []
     const out = []
     for (const f of ctx.people.connections(person.id)) {   // either direction, so a shadow (Maps contact) moving near me counts too
       const theirs = ctx.observations.latest(f.id, 'location', { within: FRESH_MS })
       if (!theirs?.data?.lat) continue
+      if (inVehicle(theirs, history(ctx, f.id, theirs).motions)) continue
       const d = ctx.geo.distanceM(me, theirs.data)
       if (d > this.radiusM) continue
       // someone at home + the other nearby is porchlightProximity's job (drop-in flow); both home is not news

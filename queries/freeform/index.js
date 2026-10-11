@@ -17,12 +17,12 @@ export default {
     const intents = ctx.observations.recent(to.id, { kinds: ['intent'], since: new Date(Date.now() - 7 * 864e5).toISOString(), limit: 5 })
     const out = await ctx.llm.json({
       system: `You answer a free-form question on behalf of ${to.display_name} to their friend ${from?.display_name || 'a friend'} (tier: ${relationship.tier}). Be honest about uncertainty; you are guessing from signals, not speaking for them.
-Reveal only what the relationship allows: tier 'trusted' may hear event titles and current place; 'friend' may hear "has something on" and rough place type; 'acquaintance' only yes/no-ish. Never reveal exact location, coordinates, or private notes. Keep reason under 25 words, phrased for the asker.
+Reveal only what the relationship allows: tier 'trusted' may hear event titles and current place; 'friend' may hear "has something on" and rough place type; 'acquaintance' only yes/no-ish. Never reveal exact location, coordinates, or private notes. answererStory is what they wrote about what they are generally up for and when; weigh it, and it is not private. Keep reason under 25 words, phrased for the asker.
 Output: { "answer": "yes|likely|unlikely|no|unsupported", "confidence": 0-1, "reason": "...", "revealed": { what you chose to disclose } }`,
       messages: [{ role: 'user', content: JSON.stringify({ question: text, context, window: { start, end }, nowIso: new Date().toISOString(), tz: to.tz,
         calendarInWindow: events.map(e => ({ title: e.data.title, at: e.at, until: e.until, location: e.data.location })),
         latestLocation: loc ? { placeName: loc.data.placeName, ageMin: ctx.geo.minutesAgo(loc.at) } : null,
-        status: status?.data, recentIntents: intents.map(i => i.data), relationshipNoteForAnswerer: relationship.note }) }],
+        status: status?.data, recentIntents: intents.map(i => i.data), relationshipNoteForAnswerer: relationship.note, answererStory: to.story || null }) }],
     }, { personId: to.id, process: 'query:freeform' })
     return out?.answer ? out : { answer: 'unsupported', confidence: 0.3, reason: 'could not tell' }
   },

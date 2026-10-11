@@ -27,7 +27,8 @@ export default {
   async answer(ctx, { from, to, relationship, text, context }) {
     const light = porchlight(ctx, to)
     const who = from?.display_name || 'A friend'
-    const base = { confidence: 0.9, revealed: { porchlight: light.state } }
+    // the host's story (what they're generally up for and when) is readable by friends; the asker's agent weighs it
+    const base = { confidence: 0.9, revealed: { porchlight: light.state, ...(light.note ? { note: light.note } : {}), ...(to.story ? { story: to.story } : {}) } }
 
     if (light.state === 'closed') return { ...base, answer: 'no', reason: 'not a good time', confidence: 1 }
 

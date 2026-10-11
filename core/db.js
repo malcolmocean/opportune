@@ -16,6 +16,8 @@ create table if not exists people (
   privkey text,
   tz text default 'America/Los_Angeles',
   home_place_id text,
+  dropin_note text not null default '',   -- standing note for drop-ins; a status note overrides it one time
+  story text not null default '',         -- plain-text "what I'm up for and when"; friends and agents read it
   policy json not null default '{}',
   onboarding json not null default '{}',
   created_at text not null
@@ -165,13 +167,28 @@ create index if not exists llm_usage_person_at on llm_usage(person_id, at);
 create index if not exists llm_usage_process_at on llm_usage(process, at);
 `
 
+// Columns added after a table first shipped. `create table if not exists` leaves an existing table alone,
+// so each is checked against pragma table_info and added when missing. [table, column, definition]
+const MIGRATIONS = [
+  ['people', 'dropin_note', `text not null default ''`],
+  ['people', 'story', `text not null default ''`],
+]
+
 export function openDb(path = process.env.DB_PATH || './data/opportune.db') {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true })
   const db = new DatabaseSync(path)
   db.exec('pragma journal_mode = wal')
   db.exec('pragma foreign_keys = on')
   db.exec(SCHEMA)
+  migrate(db)
   return wrap(db)
+}
+
+function migrate(db) {
+  for (const [table, col, def] of MIGRATIONS) {
+    const have = db.prepare(`pragma table_info(${table})`).all().some(c => c.name === col)
+    if (!have) db.exec(`alter table ${table} add column ${col} ${def}`)
+  }
 }
 
 // Small conveniences: JSON columns in/out, and row helpers.

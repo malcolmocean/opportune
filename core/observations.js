@@ -52,7 +52,7 @@ export function makeObservations(db, ctx) {
       if (kinds?.length) { conds.push(`kind in (${kinds.map(() => '?').join(',')})`); p.push(...kinds) }
       if (since) { conds.push('(until >= ? or at >= ?)'); p.push(since, since) }
       if (until) { conds.push('at <= ?'); p.push(until) }
-      return db.all(`select * from observations where ${conds.join(' and ')} order by at desc limit ?`, ...p, limit).map(r => parseRow(r, ['data', 'raw']))
+      return db.all(`select * from observations where ${conds.join(' and ')} order by at desc, rowid desc limit ?`, ...p, limit).map(r => parseRow(r, ['data', 'raw']))   // rowid breaks same-ms ties (a motion + its fix)
     },
     // events overlapping a window, for availability/plans
     eventsIn(personId, startIso, endIso) {

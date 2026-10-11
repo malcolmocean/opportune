@@ -76,12 +76,13 @@ app.get('/api/app/state', async (req, res) => {
     if (!rel?.effectiveGrants?.askDropin) return null
     const l = porchlight(ctx, f), pres = presence(ctx, f.id)
     const d = myPres.loc && pres.home ? ctx.geo.distanceM(myPres.loc.data, pres.home) : null
-    return { d, row: { id: f.id, name: f.display_name, wantMore: !!f.outgoing?.want_more, theyWantMore: !!f.incoming?.want_more,
+    return { d, row: { id: f.id, name: f.display_name, wantMore: !!f.outgoing?.want_more, theyWantMore: !!f.incoming?.want_more, story: f.story || null,
       porchlight: { state: l.state, source: l.source, until: l.until || null, remainingMin: remaining(l), strength: strength(l), note: l.note || null },
       home: pres.isHome ? 'home' : pres.loc ? 'out' : 'unknown', hasHome: !!pres.home,
       distanceBand: d == null ? null : d < 500 ? 'a block away' : d < 2000 ? 'nearby' : d < 8000 ? 'across town' : 'far' } }
   }).filter(Boolean).sort((a, b) => (a.row.porchlight.state === 'open' ? 0 : 1) - (b.row.porchlight.state === 'open' ? 0 : 1) || (a.d ?? 1e9) - (b.d ?? 1e9)).map(x => x.row)
   res.json({ me: { id: me.id, name: me.display_name, hasHome: !!myPres.home, atHome: myPres.isHome, onboarding: me.onboarding?.step || null,
+      story: me.story || '', defaultNote: me.dropin_note || '',   // ingest { story } / { defaultNote } to set; porchlight.note below is the resolved one (status note, else defaultNote)
       porchlight: { state: mine.state, source: mine.source, until: mine.until || null, remainingMin: remaining(mine), strength: strength(mine), note: mine.note || null } },
     friends, nudges: ctx.nudges.recent(me.id, 20), now: new Date().toISOString() })
 })

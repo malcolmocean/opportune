@@ -16,8 +16,13 @@ export const POLICY_DEFAULTS = {
   revealUnprompted: ['status'],    // observation kinds the agent may volunteer
 }
 
+export const STORY_MAX = 2000        // people.story: what I'm generally up for and when
+export const DROPIN_NOTE_MAX = 500   // people.dropin_note: standing note shown to friends who might drop in
+
 export function makePeople(db, env, events) {
   const nodeUrl = env.NODE_URL || 'http://localhost:3400'
+  // Local people freeze node_url at creation; when NODE_URL changes (new domain) their rows follow it. Remote people keep theirs.
+  db.run('update people set node_url = ? where remote = 0 and node_url != ?', nodeUrl, nodeUrl)
   const P = {
     nodeUrl,
     get(id) { return parseRow(db.get('select * from people where id = ?', id), ['policy', 'onboarding']) },
@@ -42,6 +47,15 @@ export function makePeople(db, env, events) {
       return P.get(id)
     },
     policy(id) { return { ...POLICY_DEFAULTS, ...(P.get(id)?.policy || {}) } },
+    // profile text the person writes about themself: { story?, dropinNote? }. Strings only, trimmed and clamped; '' clears.
+    // Returns the person, or null when nothing in the patch was a usable key.
+    setProfile(id, { story, dropinNote } = {}) {
+      const patch = {}
+      if (typeof story === 'string') patch.story = story.trim().slice(0, STORY_MAX)
+      if (typeof dropinNote === 'string') patch.dropinNote = dropinNote.trim().slice(0, DROPIN_NOTE_MAX)
+      if (!Object.keys(patch).length) return null
+      return P.update(id, patch)
+    },
 
     // identities: how channels find a person
     identify(channel, externalId) {

@@ -78,8 +78,14 @@ Node ──hosts──▶ Person ──has──▶ Source* ──writes──�
 ```
 
 ### Person
-`{ id, nodeUrl, displayName, pubkey, tz, home: Place? }`. Identity is a keypair.
+`{ id, nodeUrl, displayName, pubkey, tz, home: Place?, story, dropinNote }`. Identity is a keypair.
 A person lives on exactly one node. Friends may be on other nodes.
+- `story`: plain text the person writes about what they are generally up for and when ("free weeknights
+  after 8, love a walk, hate phone calls, Saturday mornings are family"). Not private: friends can read it,
+  and it goes into the Judge prompt for every participant, the answering agents (availability, freeform,
+  dropin's `revealed`) and the person's own chat agent. Max 2000 chars.
+- `dropinNote`: the standing note shown with the porchlight ("come round the back"). A status observation
+  with its own `note` replaces it for that status only; a status without a note shows the default again.
 
 ### Observation (the log, from day 1)
 Append-only, normalized. Every source writes these; every trigger reads them.
@@ -140,6 +146,16 @@ Deterministic. Runs on observation insert (`on: ['location']`) or cron.
 Emits `Opportunity { kind, participants, evidence: Observation[], expiresAt, score? }`.
 No LLM calls in triggers. v1 triggers: `nearby`, `coAttendance`, `porchlightProximity`,
 `eventInterest` (emits candidates; the Judge does the taste reasoning).
+
+**Drive-by isn't drop-in, but cars exist.** A fix is "in a vehicle" when its speed is >= 5 m/s or the
+phone's motion state in force (within 10 min) is driving/transit (`core/motion.js`). `nearby` never fires
+on such a fix, for either side. `porchlightProximity`, for A near F's home:
+- A in a vehicle → nothing, unless A's private `travel` toward F is >= 2 (someone who would happily drive to
+  F is plausibly doing exactly that) → fire now, evidence `arrivedBy: 'car'`, summary says "in a car".
+- A out of the vehicle but in one within the last 10 min → fire once A has dwelt: 2 fixes over 3 minutes,
+  inside the radius, none in a vehicle → evidence `arrivedBy: 'car'`, summary says "just parked".
+- A on foot with no recent vehicle → fire on the first fix, as before.
+The travel number never leaves A's node; only the fact of the car does. Evidence never carries coordinates.
 
 ### Judge
 One LLM call per Opportunity, with: the opportunity, each participant's policy

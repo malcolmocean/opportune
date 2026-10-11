@@ -12,7 +12,7 @@ Every plugin function receives `ctx` first:
 | ctx member | what |
 |---|---|
 | `ctx.db` | sqlite wrapper: `get/all/run/insert/kvGet/kvSet` (see `core/db.js`) |
-| `ctx.people` | `get(id)`, `all()`, `create({displayName, tz})`, `update(id, patch)`, `identify(channel, externalId)`, `bind(personId, channel, externalId)`, `identities(id)`, `addContacts(ownerId, [{name, emails, phones}])`, `contactName(ownerId, {email})`, `ownersWithContact('email', v)`, `friendsOf(id)` (outgoing edges), `connections(id)` (either direction, with `.outgoing`/`.incoming`), `rel(from,to)` (has `.effectiveGrants`), `setRel(from, to, patch)` (only tier/wantMore/travel/note/grants/via/vouch), `mutual(a,b)`, `home(id)`, `places(id)`, `addPlace` (name `'home'` also sets `home_place_id`), `invite`, `peekInvite(code)`, `acceptInvite(code, joinerId)`, `policy(id)`, `nodeUrl` |
+| `ctx.people` | `get(id)`, `all()`, `create({displayName, tz})`, `update(id, patch)`, `setProfile(id, {story, dropinNote})` (trimmed, clamped to `STORY_MAX`/`DROPIN_NOTE_MAX`, `''` clears), `identify(channel, externalId)`, `bind(personId, channel, externalId)`, `identities(id)`, `addContacts(ownerId, [{name, emails, phones}])`, `contactName(ownerId, {email})`, `ownersWithContact('email', v)`, `friendsOf(id)` (outgoing edges), `connections(id)` (either direction, with `.outgoing`/`.incoming`), `rel(from,to)` (has `.effectiveGrants`), `setRel(from, to, patch)` (only tier/wantMore/travel/note/grants/via/vouch), `mutual(a,b)`, `home(id)`, `places(id)`, `addPlace` (name `'home'` also sets `home_place_id`), `invite`, `peekInvite(code)`, `acceptInvite(code, joinerId)`, `policy(id)`, `nodeUrl` |
 | `ctx.observations` | `ingest(personId, sourceId, obs[])`, `latest(personId, kind, {within, activeOnly})`, `recent(personId, {kinds, since, limit})`, `eventsIn(personId, startIso, endIso)` |
 | `ctx.query` | `ask({from,to,kind,text,window})`, `fanout(from, {...})` |
 | `ctx.nudges` | `send(personId, {text, actions, decisionId}, {from})` (`from`: the local person it's on behalf of; signs the request when the target is remote), `respond(nudgeId, actionKey)` |
@@ -30,7 +30,7 @@ Every plugin function receives `ctx` first:
 { kind, at, until?, data, raw?, dedupeKey? }
 kind: 'location' { lat, lng, acc?, speed?, placeId?, placeName? }
       'event'    { title, start?, end?, location?, attendees?: [{name, email}], url?, provider, busy? }
-      'status'   { porchlight: 'open'|'closed'|'ask', note? }   // `until` matters
+      'status'   { porchlight: 'open'|'closed'|'ask', note? }   // `until` matters; no note → people.dropin_note shows instead
       'intent'   { text, kind?, window?, people? }
       'motion'   { state: 'still'|'walking'|'driving'|'transit' }
       'mention'  { text, inferredPlace?, inferredWindow?, provider }   // tweets, chat
@@ -70,7 +70,17 @@ export default {
   runCron?(ctx) → Opportunity[],
 }
 ```
-**No LLM calls in triggers.** They are cheap deterministic detectors. Emit:
+**No LLM calls in triggers.** They are cheap deterministic detectors.
+
+Cars: `core/motion.js` tells you whether a fix was taken in a vehicle (`inVehicle(fix, motions)`: speed >=
+`VEHICLE_SPEED_MPS`, else the motion state in force within `MOTION_FRESH_MS`) and when the person was last in one
+(`lastVehicleAt`). `nearby` ignores any fix taken in a vehicle. `porchlightProximity` applies the drive-by rule: in a
+vehicle inside the radius → no opportunity unless A's private `travel` toward F is >= `TRAVEL_WOULD_DRIVE` (2); just out
+of a vehicle → wait for `DWELL_FIXES` (2) non-vehicle fixes over `DWELL_MS` (3 min) inside the radius; on foot with no
+recent vehicle → fire at once. When a car was involved the location evidence carries `arrivedBy: 'car'` (never the
+travel number, never coordinates).
+
+Emit:
 ```js
 { kind, participants: [personId...], primary?: personId /* who to tell; null = each */,
   summary: 'one plain sentence with names, place, time',   // what the Judge reads

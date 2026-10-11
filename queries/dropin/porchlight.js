@@ -10,15 +10,19 @@ export function homePlace(ctx, personId) {
 
 // Effective porchlight right now: an explicit status observation still within its `until`,
 // else an open window from policy.dropinWindows for the local time in the person's tz,
-// else policy.dropinDefault. Returns { state, source, until? }.
+// else policy.dropinDefault. Returns { state, source, until?, note? }.
+// `note` is the status's own note when it has one, else the person's standing dropin_note (set once, survives
+// every status change; a status note replaces it for that status only). Absent when both are empty.
 export function porchlight(ctx, person) {
   const row = ctx.observations.latest(person.id, 'status', { activeOnly: true })
-  if (['open', 'closed', 'ask'].includes(row?.data?.porchlight)) return { state: row.data.porchlight, source: 'status', until: row.until, note: row.data.note }
+  const defaultNote = person.dropin_note ?? ctx.people.get(person.id)?.dropin_note
+  const withNote = (r, own) => { const note = own || defaultNote; return note ? { ...r, note } : r }
+  if (['open', 'closed', 'ask'].includes(row?.data?.porchlight)) return withNote({ state: row.data.porchlight, source: 'status', until: row.until }, row.data.note)
   const pol = ctx.people.policy(person.id)
   const { day, hour } = localNow(person.tz)
   const inWindow = (pol.dropinWindows || []).some(w => (!w.days || w.days.includes(day)) && spans(w.start, w.end, hour))
-  if (inWindow) return { state: 'open', source: 'window' }
-  return { state: pol.dropinDefault || 'ask', source: 'default' }
+  if (inWindow) return withNote({ state: 'open', source: 'window' })
+  return withNote({ state: pol.dropinDefault || 'ask', source: 'default' })
 }
 
 // { day: 0..6 (Sun..Sat), hour: 0..23 } in the given IANA tz.

@@ -62,7 +62,7 @@ export function makeJudge(db, ctx) {
       }
       const others = opp.participants.filter(p => p !== person.id).map(id => {
         const p = ctx.people.get(id), r = ctx.people.rel(person.id, id)
-        return { id, name: p?.display_name, tier: r?.tier, wantMore: !!r?.want_more, note: r?.note, theyWantMore: !!ctx.people.rel(id, person.id)?.want_more }
+        return { id, name: p?.display_name, tier: r?.tier, wantMore: !!r?.want_more, note: r?.note, theyWantMore: !!ctx.people.rel(id, person.id)?.want_more, story: p?.story || null }
       })
       const recent = db.all(`select n.text, n.response, n.created_at from nudges n where n.person_id = ? order by created_at desc limit 8`, person.id)
       const ratings = db.all(`select d.verdict, d.reasoning, d.rating, d.rating_note, o.summary from decisions d left join opportunities o on o.id = d.opportunity_id where d.person_id = ? and d.rating is not null order by d.rated_at desc limit 12`, person.id)
@@ -73,9 +73,11 @@ The person's time and attention are precious: a bad nudge costs trust, a missed 
 Never reveal one participant's private settings (travel willingness, notes) to another. The nudge text goes to the person named below only.
 Write nudge text in a warm, brief, slightly playful voice. One or two sentences. Include the concrete fact (who/where/when). Suggest the cheapest action.
 Verdicts: "suppress" (log only), "nudge" (send text now), "ask" (first ask the other participant's agent a question of kind availability|dropin|plans, then decide). When otherParticipants is empty there is nobody to ask: choose suppress or nudge.
+Each participant's "story" is plain text they wrote about what they are generally up for and when (free weeknights, hates calls, Saturday mornings are family). It is not private; weigh it for both the person and the others.
+Evidence may carry arrivedBy: "car" on a location: that person is in or just out of a car near the place, so say so and expect a shorter, more deliberate visit than a passer-by on foot.
 Past ratings from this person on your earlier calls are the strongest signal of what they want. A rating is about the verdict, not the event: "bad" on a suppress means "I should have been nudged"; "bad" on a nudge means "you should have stayed quiet"; "good" means the call was right.`
       const user = {
-        person: { id: person.id, name: person.display_name, tz: person.tz, policy: ctx.people.policy(person.id) },
+        person: { id: person.id, name: person.display_name, tz: person.tz, policy: ctx.people.policy(person.id), story: person.story || null },
         opportunity: { kind: opp.kind, summary: opp.summary, evidence: opp.evidence, expiresAt: opp.expires_at, trigger: opp.trigger_id },
         otherParticipants: others,
         personsRecentObservations: myNow.map(o => ({ kind: o.kind, at: o.at, data: o.data })),

@@ -21,6 +21,8 @@ export function makeAgent(db, ctx) {
           run: ({ text, window, friendIds }) => ctx.query.fanout(me, { kind: 'availability', text, window, toIds: friendIds }) },
         { name: 'set_status', description: 'Set my porchlight: open (drop-ins welcome), closed, or ask. Optional note and until (ISO).', input_schema: { type: 'object', properties: { porchlight: { type: 'string', enum: ['open', 'closed', 'ask'] }, note: { type: 'string' }, until: { type: 'string' } }, required: ['porchlight'] },
           run: ({ porchlight, note, until }) => ctx.observations.ingest(me, 'manual', [{ kind: 'status', data: { porchlight, note }, until: until || new Date(Date.now() + 4 * 3600e3).toISOString() }]) },
+        { name: 'update_profile', description: 'Set my story (plain text friends and agents read: what I am generally up for and when) and/or my default drop-in note (standing note friends see with my porchlight; a status note replaces it one time). Empty string clears.', input_schema: { type: 'object', properties: { story: { type: 'string' }, defaultNote: { type: 'string' } } },
+          run: ({ story, defaultNote }) => { const p = ctx.people.setProfile(me, { story, dropinNote: defaultNote }); return p ? { story: p.story, defaultNote: p.dropin_note } : { error: 'nothing to set' } } },
         { name: 'record_intent', description: 'Record something I want: an outing, a standing hangout, a call, a walk. The system will try to match it.', input_schema: { type: 'object', properties: { text: { type: 'string' }, kind: { type: 'string' }, window: { type: 'object' }, people: { type: 'array', items: { type: 'string' } } }, required: ['text'] },
           run: ({ text, kind, window, people }) => ctx.observations.ingest(me, 'manual', [{ kind: 'intent', data: { text, kind, window, people } }]) },
         { name: 'make_invite', description: 'Create a one-time invite link for a person I want to see more of.', input_schema: { type: 'object', properties: { name: { type: 'string' }, wantMore: { type: 'boolean' } }, required: ['name'] },
@@ -37,7 +39,7 @@ export function makeAgent(db, ctx) {
       return `You are ${person.display_name || 'your person'}'s agent in "opportune", which helps friends spend time together at low marginal cost: joining each other's existing plans, dropping in when nearby, carpooling to the same event.
 Be brief and warm. Prefer doing (call a tool) over describing. When asked who's around, call whos_around and present a tight shortlist with one-line reasons; offer to draft a text for friends not on the system.
 Respect the person's filter: only suggest people they've marked wantMore or who marked them, unless asked otherwise.
-Never reveal a friend's private 'travel' number or notes about them. Today is ${now()}; the person's timezone is ${person.tz}.`
+Never reveal a friend's private 'travel' number or notes about them. Today is ${now()}; the person's timezone is ${person.tz}.${person.story ? `\nTheir story (what they are generally up for and when, in their words; friends can read it): ${person.story}` : ''}${person.dropin_note ? `\nTheir default drop-in note (shown to friends with their porchlight): ${person.dropin_note}` : ''}`
     },
     async chat(personId, text) {
       const person = ctx.people.get(personId)

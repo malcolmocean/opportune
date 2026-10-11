@@ -20,6 +20,7 @@ Fill in `.env`:
   Quick options: `pnpm tunnel` (cloudflared, prints a trycloudflare.com URL),
   `ngrok http 3400`, or `tailscale funnel 3400`. Set NODE_URL to whatever that prints.
 - `FIREBASE_SERVICE_ACCOUNT_JSON` (optional): for Android push. See `apps/android/README.md`.
+- `RESEND_API_KEY` + `EMAIL_FROM` (optional): email sign-in, so nobody has to go through Telegram. See below.
 
 ```
 pnpm dev          # server + telegram bot + cron
@@ -29,6 +30,21 @@ pnpm test
 
 Then open your bot in Telegram, `/start`. Onboarding is six messages. `/invite Eileen`
 makes a one-time link that tells Eileen you want to see more of her.
+
+## Email sign-in (Resend)
+
+People can sign in to `/app` with a one-time link instead of Telegram. Mail goes out through
+[Resend](https://resend.com) over its HTTP API (no SDK):
+
+1. In Resend, add your sending domain and put the DNS records it shows (SPF, DKIM) on that domain.
+   Wait for it to say verified. Without a verified domain you can only send to your own address.
+2. Make an API key (Sending access is enough) and set it as `RESEND_API_KEY` in `.env`.
+3. Set `EMAIL_FROM` to an address on that domain, e.g. `opportune <hello@opportune.club>`.
+
+Leave `RESEND_API_KEY` empty and the channel stays off: the sign-in routes answer 503 and
+nothing else changes. With it set, `POST /app/email/request { email }` mails a 15-minute link to
+any address already bound to a person (`POST /api/app/email { email }` from inside the app adds
+and verifies one), and people with no push and no Telegram get their nudges as plain-text mail.
 
 ## Deploy to a VPS
 
@@ -51,7 +67,7 @@ bot token at a time, so stop `pnpm dev` locally before deploying.
 | `sources/` | where data comes from: ICS calendar, phone location, Gmail RSVP emails, Google Maps sharing, tweets, Matrix |
 | `triggers/` | deterministic detectors: nearby, co-attendance, porchlight proximity, event interest, standing slot, in-town, contact joined |
 | `queries/` | what a friend's agent may ask yours: availability, dropin, plans, whereabouts |
-| `channels/` | telegram, fcm (Android push) |
+| `channels/` | telegram, fcm (Android push), email (magic-link sign-in via Resend) |
 | `web/` | magic-link management page: friends, grants, sources, decision review, trusted-tier map |
 | `apps/android` | location source + push + porchlight toggle |
 | `docs/PLUGINS.md` | how to write any of the above |

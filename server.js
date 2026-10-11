@@ -5,6 +5,7 @@ import { mountAdmin, devOk } from './core/admin.js'
 import { startCron } from './core/cron.js'
 import { log } from './core/log.js'
 import { isValidTz } from './core/geo.js'
+import { mountEmail } from './channels/email/index.js'
 
 const L = log('server')
 const ctx = await buildContext()
@@ -96,6 +97,9 @@ app.post('/app/claim', async (req, res) => {
   const { manageUrl } = await import('./web/routes.js')
   res.json({ personId: p.id, displayName: p.display_name, ingestUrl: ctx.sources.ingestUrl(sc), manageUrl: manageUrl(ctx, p.id), telegramLink: null, inviter: null })
 })
+
+// ---- email magic-link sign-in and address verification (channels/email): /app/email/request, /app/email/verify/:code, /api/app/email ----
+mountEmail(app, ctx)
 
 // ---- dev / admin-only routes: open when NODE_ENV !== 'production', else need the admin token (?token= or x-admin-token) ----
 const dev = (req, res, next) => (devOk(ctx, req) ? next() : res.status(401).json({ error: 'admin token required' }))

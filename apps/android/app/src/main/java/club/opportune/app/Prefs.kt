@@ -25,6 +25,7 @@ object Prefs {
     private const val KEY_LAST_POST = "lastPostAt"
     private const val KEY_LAST_POST_OK = "lastPostOk"
     private const val KEY_FCM_REGISTERED = "fcmRegisteredToken"
+    private const val KEY_PORCHLIGHT = "porchlight"
     private const val MAX_NUDGES = 50
 
     private fun sp(c: Context): SharedPreferences = c.getSharedPreferences(FILE, Context.MODE_PRIVATE)
@@ -39,7 +40,7 @@ object Prefs {
     /**
      * Forget everything that ties this install to a person: the ingest URL (the credential), the FCM
      * registration memory, the contacts switch and its sync markers, the post markers and the cached
-     * nudges. The node override survives, it's config, not identity. Use Session.signOut, which also
+     * nudges and the widget's porchlight. The node override survives, it's config, not identity. Use Session.signOut, which also
      * stops the services; this only wipes storage.
      */
     fun clearSession(c: Context) {
@@ -47,7 +48,7 @@ object Prefs {
             .remove(KEY_URL).remove(KEY_FCM_REGISTERED)
             .remove(KEY_CONTACTS).remove(KEY_CONTACTS_SYNC).remove(KEY_CONTACTS_COUNT)
             .remove(KEY_LAST_POST).remove(KEY_LAST_POST_OK)
-            .remove(KEY_NUDGES)
+            .remove(KEY_NUDGES).remove(KEY_PORCHLIGHT)
             .apply()
     }
 
@@ -95,6 +96,10 @@ object Prefs {
     fun markPost(c: Context, ok: Boolean) =
         sp(c).edit().putLong(KEY_LAST_POST, System.currentTimeMillis()).putBoolean(KEY_LAST_POST_OK, ok).apply()
     fun lastPost(c: Context): Pair<Long, Boolean> = sp(c).getLong(KEY_LAST_POST, 0L) to sp(c).getBoolean(KEY_LAST_POST_OK, false)
+
+    /** The last me.porchlight from /api/app/state, so the widget can redraw without waiting on the network. */
+    fun porchlight(c: Context): JSONObject? = sp(c).getString(KEY_PORCHLIGHT, null)?.let { try { JSONObject(it) } catch (e: Exception) { null } }
+    fun setPorchlight(c: Context, pl: JSONObject?) = sp(c).edit().putString(KEY_PORCHLIGHT, pl?.toString()).apply()
 
     fun fcmRegisteredToken(c: Context): String? = sp(c).getString(KEY_FCM_REGISTERED, null)
     fun setFcmRegisteredToken(c: Context, t: String?) = sp(c).edit().putString(KEY_FCM_REGISTERED, t).apply()

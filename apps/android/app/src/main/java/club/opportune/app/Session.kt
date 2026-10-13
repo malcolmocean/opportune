@@ -24,6 +24,8 @@ object Session {
         LocationService.stop(context)
         // Nudge notifications would otherwise keep buttons that POST to nothing.
         context.getSystemService(NotificationManager::class.java)?.cancelAll()
+        // The widget would otherwise keep showing (and offering to flip) a porchlight that isn't ours anymore.
+        PorchlightWidget.redraw(context)
         // Invalidate the push token so a node that still has it on file can't reach this phone. A fresh
         // one is minted (and registered) on the next sign-in; KEY_FCM_REGISTERED is gone, so it will post.
         if (FirebaseApp.getApps(context).isNotEmpty()) {

@@ -38,6 +38,13 @@ Package: `club.opportune.app`. minSdk 26, target/compile 34. Kotlin, AGP 8.2, Gr
 - If the main frame fails to load (network error, or HTTP ≥ 500) a native fallback shows the error with **Retry** and a
   **Change node** field; a valid URL typed there becomes the node override.
 
+`PorchlightWidget` is a home-screen widget: a lantern and a line (1×1 lantern only, 1×2 and 2×2 words under it,
+2×1 words beside it). Tap it dark (off or ask me first) → on for 2 hours; tap it lit → off (closed, which holds until
+changed). Signed out, a tap opens the app. It's reconfigurable, so the launcher's long-press "Widget settings" opens
+`PorchlightMenuActivity`: the porch sheet's choices (1h, 2h, 4h, tonight, ask, off, off for the night) as a list. It draws from the
+porchlight cached in Prefs and re-reads `GET /api/app/state` on the 30-min system tick, when `MainActivity` pauses
+(the web app may have just changed it), after a tap, and at the porchlight's `until`.
+
 Details worth knowing on the web side:
 
 - `setIngestUrl(url)` is a no-op (logged) if the URL isn't `…/ingest/<source>/<token>`. On success it persists, starts
@@ -121,8 +128,9 @@ Or open `apps/android` in Android Studio and press Run. Debug builds have WebVie
 | app start / `setIngestUrl` / token rotation | `{ fcmToken, device: { model, manufacturer, android, app } }` |
 | notification action button | `{ nudgeResponse: { nudgeId, key } }` |
 | contacts granted, then daily | `{ contacts: [{ name, emails: [], phones: [] }] }` in batches of 200 |
+| porchlight widget tap | `{ status: { porchlight: 'open', hours: 2 } }` or `{ status: { porchlight: 'closed' } }` |
 
-Porchlight, status, home and in-app nudge responses are posted by the web app itself.
+Porchlight (except the widget), status, home and in-app nudge responses are posted by the web app itself.
 
 Push payload it expects (data message): `{ nudgeId, text, actions: '[{"key","label"}]' }`.
 

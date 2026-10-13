@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Layouts by size (PorchlightWidget.views): 1×1 lantern only, 1×2 and 2×2 lantern over words, 2×1 and wider
+     lantern beside words. "reconfigurable" puts "Widget settings" in the launcher's long-press menu, which opens
+     PorchlightMenuActivity; "configuration_optional" keeps it from opening when the widget is placed (Android 12+).
+     30 min is the system floor for updatePeriodMillis; the widget also refreshes when the app is backgrounded and at the porchlight's `until`. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="110dp"
+    android:minHeight="40dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="1"
+    android:minResizeWidth="40dp"
+    android:minResizeHeight="40dp"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen"
+    android:updatePeriodMillis="1800000"
+    android:configure="club.opportune.app.PorchlightMenuActivity"
+    android:widgetFeatures="reconfigurable|configuration_optional"
+    android:initialLayout="@layout/widget_porchlight"
+    android:previewLayout="@layout/widget_porchlight"
+    android:previewImage="@drawable/lantern_on"
+    android:description="@string/widget_description" />

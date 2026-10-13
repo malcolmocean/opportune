@@ -26,4 +26,31 @@
     <string name="location_notification_text">Sharing location with your node</string>
     <string name="nudge_channel_name">Nudges</string>
     <string name="nudge_channel_description">Opportunities to see your people</string>
+
+    <!-- home-screen widget -->
+    <string name="widget_label">Porchlight</string>
+    <string name="widget_description">Turn your porchlight on with one tap</string>
+    <string name="widget_title_on">Porchlight on</string>
+    <string name="widget_title_ask">Ask me first</string>
+    <string name="widget_title_off">Porchlight off</string>
+    <string name="widget_title_signed_out">Porchlight</string>
+    <string name="widget_sub_turn_on">Tap to turn on for %1$d hours</string>
+    <string name="widget_sub_turn_off">Tap to turn off</string>
+    <string name="widget_sub_until_turn_off">Until %1$s · tap to turn off</string>
+    <string name="widget_sub_signed_out">Open opportune to sign in</string>
+    <string name="widget_sub_turning_on">Turning on…</string>
+    <string name="widget_sub_turning_off">Turning off…</string>
+    <string name="widget_sub_saving">Updating…</string>
+    <string name="widget_until">until %1$s</string>
+    <string name="widget_sub_failed">Couldn\'t reach opportune</string>
+
+    <!-- widget long-press menu (launcher "Widget settings") -->
+    <string name="menu_on_1h">On for 1 hour</string>
+    <string name="menu_on_2h">On for 2 hours</string>
+    <string name="menu_on_4h">On for 4 hours</string>
+    <string name="menu_on_tonight">On tonight</string>
+    <string name="menu_ask">Ask me first</string>
+    <string name="menu_off">Off</string>
+    <string name="menu_off_night">Off for the night</string>
+    <string name="menu_open_app">Open opportune</string>
 </resources>

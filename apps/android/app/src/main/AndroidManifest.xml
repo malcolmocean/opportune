@@ -50,6 +50,17 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".PorchlightMenuActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Opportune.Menu">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
         <service
             android:name=".LocationService"
             android:foregroundServiceType="location"
@@ -65,6 +76,13 @@
 
         <receiver android:name=".NotificationActionReceiver" android:exported="false" />
         <receiver android:name=".ActivityReceiver" android:exported="false" />
+
+        <receiver android:name=".PorchlightWidget" android:label="@string/widget_label" android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/porchlight_widget_info" />
+        </receiver>
 
         <receiver android:name=".BootReceiver" android:exported="true">
             <intent-filter>

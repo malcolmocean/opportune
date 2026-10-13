@@ -8,11 +8,12 @@ import org.json.JSONObject
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 
 /**
  * Every request is a JSON POST to the one ingest URL. The server-side source (sources/opportuneApp)
- * dispatches on shape: a location array, { fcmToken }, { nudgeResponse }, { contacts }. (Porchlight/status
- * is set by the web app itself, not by the shell.)
+ * dispatches on shape: a location array, { fcmToken }, { nudgeResponse }, { contacts }, and { status } (the
+ * porchlight; the web app sets it too, the shell only from the home-screen widget).
  */
 object ApiClient {
     private const val TAG = "ApiClient"
@@ -71,6 +72,26 @@ object ApiClient {
 
     fun respond(context: Context, nudgeId: String, key: String): Boolean =
         post(context, JSONObject().put("nudgeResponse", JSONObject().put("nudgeId", nudgeId).put("key", key)).toString()) in 200..299
+
+    /** { porchlight, hours?, until? }, as the web app's porch sheet sends it. Returns the HTTP status. */
+    fun setStatus(context: Context, status: JSONObject): Int = post(context, JSONObject().put("status", status).toString())
+
+    /** GET /api/app/state on the node the ingest URL names → its `me.porchlight`, or null on any failure. */
+    fun myPorchlight(context: Context): JSONObject? {
+        val node = Prefs.parseIngestUrl(Prefs.ingestUrl(context)) ?: return null
+        var conn: HttpURLConnection? = null
+        return try {
+            conn = (URL("${node.baseUrl}/api/app/state?token=${URLEncoder.encode(node.token, "UTF-8")}").openConnection() as HttpURLConnection).apply {
+                connectTimeout = TIMEOUT_MS; readTimeout = TIMEOUT_MS
+                setRequestProperty("User-Agent", "opportune-android/${BuildConfig.VERSION_NAME}")
+            }
+            if (conn.responseCode !in 200..299) return null
+            JSONObject(conn.inputStream.bufferedReader().readText()).optJSONObject("me")?.optJSONObject("porchlight")
+        } catch (e: Exception) {
+            Log.w(TAG, "state failed: ${e.message}")
+            null
+        } finally { conn?.disconnect() }
+    }
 
     fun postContacts(context: Context, contacts: JSONArray): Boolean =
         post(context, JSONObject().put("contacts", contacts).toString()) in 200..299

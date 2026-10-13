@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- lit: warm light pooling from the lantern's side -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <gradient android:type="radial" android:centerX="0.2" android:centerY="0.5" android:gradientRadius="160dp"
+        android:startColor="#3D2416" android:endColor="@color/bg" />
+    <corners android:radius="20dp" />
+</shape>

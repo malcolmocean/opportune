@@ -201,6 +201,8 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         webView.onPause()
+        // The web app may have just changed the porchlight; the widget only finds out by asking.
+        PorchlightWidget.refresh(this)
         try { unregisterReceiver(nudgeReceived) } catch (e: IllegalArgumentException) {}
         try { unregisterReceiver(nudgesChanged) } catch (e: IllegalArgumentException) {}
     }

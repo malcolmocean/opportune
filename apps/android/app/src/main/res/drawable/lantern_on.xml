@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The porchlight, lit: web/app/lantern.js redrawn as a vector, coloured like .lantern[data-state="open"] -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="80dp"
+    android:height="100dp"
+    android:viewportWidth="80"
+    android:viewportHeight="100">
+    <path android:pathData="M8,58 a38,38 0 1,0 76,0 a38,38 0 1,0 -76,0">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="radial" android:centerX="46" android:centerY="58" android:gradientRadius="38"
+                android:startColor="#66FF8C3C" android:endColor="#00FF6B3D" />
+        </aapt:attr>
+    </path>
+    <path android:fillColor="#8187C2" android:pathData="M6.5,12 H9.5 A2.5,2.5 0 0,1 12,14.5 V49.5 A2.5,2.5 0 0,1 9.5,52 H6.5 A2.5,2.5 0 0,1 4,49.5 V14.5 A2.5,2.5 0 0,1 6.5,12 Z" />
+    <path android:strokeColor="#8187C2" android:strokeWidth="3.2" android:strokeLineCap="round" android:pathData="M12,22 H36 Q46,22 46,30" />
+    <path android:fillColor="#8187C2" android:pathData="M43,25 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0" />
+    <path android:fillColor="#57FF9646" android:pathData="M28,41 H64 L62,76 H30 Z" />
+    <path android:fillColor="#FFBE45" android:pathData="M46,71 c-7.5,-6 -7.5,-14.5 0,-23 c7.5,8.5 7.5,17 0,23 z" />
+    <path android:fillColor="#FFECC2" android:pathData="M43.6,64 a2.4,5 0 1,0 4.8,0 a2.4,5 0 1,0 -4.8,0" />
+    <path android:strokeColor="#8187C2" android:strokeWidth="2.2" android:strokeLineJoin="round" android:pathData="M28,41 H64 L62,76 H30 Z" />
+    <path android:strokeColor="#8C8187C2" android:strokeWidth="1.4" android:pathData="M46,41 V76" />
+    <path android:fillColor="#8187C2" android:pathData="M24,41 L46,28 L68,41 Z" />
+    <path android:fillColor="#8187C2" android:pathData="M30,76 H62 L58,83 H34 Z" />
+    <path android:fillColor="#8187C2" android:pathData="M42.8,88 a3.2,3.2 0 1,0 6.4,0 a3.2,3.2 0 1,0 -6.4,0" />
+</vector>

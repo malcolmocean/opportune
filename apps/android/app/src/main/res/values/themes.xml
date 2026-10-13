@@ -11,4 +11,13 @@
         <item name="android:navigationBarColor">@color/bg</item>
         <item name="android:windowLightStatusBar">false</item>
     </style>
+
+    <!-- The widget menu: nothing of its own on screen, just its dialog over the home screen. -->
+    <style name="Theme.Opportune.Menu" parent="Theme.AppCompat.NoActionBar">
+        <item name="colorAccent">@color/accent</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:backgroundDimEnabled">true</item>
+    </style>
 </resources>

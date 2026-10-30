@@ -109,7 +109,8 @@ const tryJson = s => { try { return JSON.parse(String(s || '').trim()) } catch {
 // ---------- contacts → people → observations ----------
 
 // For each contact: resolve to a person, skip if we already have this fix, ingest under their id.
-export async function ingestContacts(ctx, owner, contacts = []) {
+// sourceId labels the observations (sources/mapperWrapper reuses this); the google id → person map is shared.
+export async function ingestContacts(ctx, owner, contacts = [], sourceId = SOURCE_ID) {
   const summary = { ingested: 0, skipped: 0, created: [], matched: [] }
   for (const c of contacts) {
     if (c?.lat == null || c?.lng == null) { summary.skipped++; continue }
@@ -119,7 +120,7 @@ export async function ingestContacts(ctx, owner, contacts = []) {
     const obs = toObservation(ctx, owner, person, c)
     const last = ctx.observations.latest(person.id, 'location')
     if (last && last.at === obs.at) { summary.skipped++; continue }
-    const rows = await ctx.observations.ingest(person.id, SOURCE_ID, [obs])
+    const rows = await ctx.observations.ingest(person.id, sourceId, [obs])
     if (rows.length) summary.ingested++
     else summary.skipped++
   }
@@ -184,7 +185,7 @@ function nearestPlace(ctx, owner, person, pt) {
 }
 
 // The owner's own fix from get_authenticated_person(), returned so core ingests it for the owner. Deduped on `at`.
-function ownerObservations(ctx, owner, me) {
+export function ownerObservations(ctx, owner, me) {
   if (!me || me.lat == null || me.lng == null) return []
   const obs = toObservation(ctx, owner, owner, me)
   const last = ctx.observations.latest(owner.id, 'location')
